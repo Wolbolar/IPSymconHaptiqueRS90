@@ -1,0 +1,19 @@
+{
+    "id": "{2743570F-B180-0216-9564-FBDB8F1926A4}",
+    "name": "Haptique Kincony Hub",
+    "type": 2,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [
+        "{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}"
+    ],
+    "childRequirements": [
+        "{EFA2DD6A-05BC-CCD8-CCE7-406880F9E98A}"
+    ],
+    "implemented": [
+        "{FD52C775-6F19-365A-70D7-1B1CA598DD8C}",
+        "{018EF6B5-AB94-40C6-AA53-46943E824ACF}"
+    ],
+    "prefix": "CRSXKH",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

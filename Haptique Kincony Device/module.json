@@ -1,0 +1,16 @@
+{
+    "id": "{B4D9D3AE-1668-4832-71DA-831516138207}",
+    "name": "Haptique Kincony Device",
+    "type": 3,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [
+        "{FD52C775-6F19-365A-70D7-1B1CA598DD8C}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{EFA2DD6A-05BC-CCD8-CCE7-406880F9E98A}"
+    ],
+    "prefix": "CRSXKD",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

@@ -1,0 +1,16 @@
+{
+    "id": "{EACDE370-4FB4-0B48-DA4F-C32526B7C652}",
+    "name": "Haptique Hub Splitter",
+    "type": 2,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [],
+    "childRequirements": [
+        "{7C051460-97B2-0CE8-EB7B-5E47EA6E2CC1}"
+    ],
+    "implemented": [
+        "{7DEF4465-6841-1542-BC31-3A0C47DB5855}"
+    ],
+    "prefix": "CHHS",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

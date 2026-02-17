@@ -1,0 +1,18 @@
+{
+    "id": "{5D7C18DA-ED94-27CF-6863-0A307AC97175}",
+    "name": "Haptique Import Configurator",
+    "type": 4,
+    "vendor": "Cantata",
+    "aliases": [
+        "Cantata RS90 Import Configurator"
+    ],
+    "parentRequirements": [
+        "{A04B56D8-C2A2-B7BB-11F1-523502DE2933}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}"
+    ],
+    "prefix": "CRSC",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

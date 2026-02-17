@@ -1,0 +1,23 @@
+{
+  "translations": {
+    "de": {
+      "command": "Befehl",
+      "No hub found, please configure harmony hub first": "kein harmony Hub gefunden, bitte zuerst einen harmony Hub einrichten",
+      "No SSDP Roku instance found, please create SSDP Roku instance first": "keine SSDP Roku Instanz gefunden, bitte zunächst eine SSDP Roku Instanz einrichten",
+      "Please choose": "Bitte auswählen",
+      "This instance is for getting keystrokes from the Harmony remote via Roku Emulator": "Diese Instanz dient dazu Tastendrücke der Harmony über Roku Emulator übermittelt zu bekommen",
+      "Please select the Harmony Hub for configuration:": "Bitte den Harmony Hub für die Konfiguration auswählen",
+      "Select activity": "Aktivität auswählen",
+      "configure activities": "Aktivitäten konfigurieren",
+      "Roku Emulator Keys": "Roku Emulator Tasten",
+      "Please select port to use for the Roku emulator:": "Bitte den Port für den Roku Emulator auswählen",
+      "harmony activity": "Harmony Aktivität",
+      "configuration valid": "Konfiguration gültig",
+      "Harmony Device is inactive": "Harmony Device ist inaktiv",
+      "Roku emulator device created.": "Roku Emulator Gerät erstellt.",
+      "creating instance": "Die Instanz wird erstellt",
+      "script": "Skript",
+      "variable": "Variable"
+    }
+  }
+}

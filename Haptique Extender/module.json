@@ -1,0 +1,16 @@
+{
+    "id": "{99DE4AB2-FEA6-AE21-3EA0-E72042EFA898}",
+    "name": "Haptique Extender",
+    "type": 3,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [
+        "{F73DA342-3026-B3F0-4BAC-896664D56D0C}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{4774FB0A-8B89-BB42-B89F-8A77BB8939C0}"
+    ],
+    "prefix": "CRSXEX",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

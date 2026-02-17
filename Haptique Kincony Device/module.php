@@ -1,0 +1,1304 @@
+<?php
+
+declare(strict_types=1);
+	class HaptiqueKinconyDevice extends IPSModule
+	{
+        /**
+         * Kincony AG Hub (Haptique Extender) HTTP API client
+         *
+         * Implemented endpoints (per Cantata KinkonyAGFW docs/tools):
+         *  - GET  /api/status
+         *  - POST /api/ir/send
+         *  - GET  /api/ir/last
+         *  - POST /api/rf/send
+         *  - POST /api/wifi/save
+         *
+         * Source reference: Cantata-Communication-Solutions/KinkonyAGFW repo (README/tools).  [oai_citation:1‡GitHub](https://github.com/Cantata-Communication-Solutions/KinkonyAGFW?utm_source=chatgpt.com)
+         */
+
+        public function Create()
+		{
+			//Never delete this line!
+			parent::Create();
+
+            // Connect to the Kincony Splitter
+            $this->ConnectParent('{2743570F-B180-0216-9564-FBDB8F1926A4}');
+
+            // Wartet, bis der Kernel gestartet ist
+            $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+            $this->RegisterMessage(0, IPS_KERNELSTARTED);
+
+            $this->RegisterPropertyString("name", "");
+            $this->RegisterAttributeString("baseURL", "");
+            $this->RegisterAttributeString("lastExportFile", "");
+            $this->RegisterAttributeString("lastExportUrl", "");
+            $this->RegisterPropertyInteger("frequency", 38000);
+            $this->RegisterPropertyString("codeFormat", "RAW");
+            $this->RegisterPropertyString("commands", "[]");
+            $this->RegisterPropertyString("deviceType", "IR");   // IR oder RF
+            $this->RegisterPropertyString("rfCommands", "[]");   // RF Befehle
+            $this->RegisterPropertyInteger("scriptCategory", 0); // Zielkategorie für automatisch erzeugte Skripte
+            $this->RegisterPropertyString("varSettings", "[]");   // Auswahl, welche Variablen erzeugt werden
+            $this->RegisterPropertyString("importFile", "");      // Pfad zur Import-Datei
+            $this->RegisterPropertyBoolean("exportIncludeMeta", true); // Export enthält Meta/Status
+		}
+
+		public function Destroy()
+		{
+			//Never delete this line!
+			parent::Destroy();
+		}
+
+        public function ApplyChanges()
+        {
+            //Never delete this line!
+            parent::ApplyChanges();
+
+            $this->NormalizeVarSettings();
+            $this->SendDebug('ApplyChanges', 'After NormalizeVarSettings varSettings(raw)=' . $this->ReadPropertyString('varSettings'), 0);
+            $this->EnsureCommandProfileAndVariable();
+            $this->UpdateFormVisibility();
+        }
+
+
+        /**
+         * Sends a command payload to the parent splitter (Kincony Hub) via SendDataToParent.
+         * The parent will handle the HTTP call to the extender.
+         *
+         * @return array Decoded JSON response from parent (if any)
+         */
+        private function ForwardCommandToParent(array $payload): array
+        {
+            $envelope = [
+                'DataID' => '{FD52C775-6F19-365A-70D7-1B1CA598DD8C}',
+                'Buffer' => json_encode($payload, JSON_UNESCAPED_SLASHES)
+            ];
+
+            $json = json_encode($envelope, JSON_UNESCAPED_SLASHES);
+            $this->SendDebug('ForwardCommandToParent', $json, 0);
+
+            $resp = $this->SendDataToParent($json);
+            if ($resp === false || $resp === null || $resp === '') {
+                $this->SendDebug('ForwardCommandToParent', 'No response from parent (SendDataToParent returned empty/false)', 0);
+                return [];
+            }
+
+            $this->SendDebug('ForwardCommandToParent', 'Parent raw response: ' . (string)$resp, 0);
+
+            $decoded = json_decode((string)$resp, true);
+            return is_array($decoded) ? $decoded : ['_raw' => (string)$resp];
+        }
+
+        /**
+         * Ask the parent splitter to build a full download URL (including hook secret and file name).
+         * The parent must implement the corresponding request handler.
+         *
+         * Expected parent response (example):
+         *  {"url":"http://<ip>:3777/hook/haptique_kinconyhub/<iid>/download?file=...&token=..."}
+         */
+        private function RequestDownloadUrlFromParent(string $fileName): string
+        {
+            $fileName = trim($fileName);
+            if ($fileName === '') {
+                return '';
+            }
+
+            $payload = [
+                'type'             => 'getDownloadUrl',
+                'deviceInstanceId' => $this->InstanceID,
+                'fileName'         => $fileName
+            ];
+
+            $resp = $this->ForwardCommandToParent($payload);
+            $this->SendDebug('RequestDownloadUrlFromParent', json_encode($resp, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0);
+
+            if (is_array($resp)) {
+                if (isset($resp['url']) && is_string($resp['url'])) {
+                    return trim($resp['url']);
+                }
+                // optional: nested reply
+                if (isset($resp['data']['url']) && is_string($resp['data']['url'])) {
+                    return trim($resp['data']['url']);
+                }
+            }
+
+            return '';
+        }
+
+        public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+        {
+            switch ($Message) {
+                case IPS_KERNELMESSAGE:
+                    if ($Data[0] === KR_READY) {
+                        $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
+
+                    }
+                    break;
+
+                case IPS_KERNELSTARTED:
+                    $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+
+                    break;
+
+                case IM_CHANGESTATUS:
+                    if ($Data[0] === IS_ACTIVE) {
+                        $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
+
+                    }
+                    break;
+            }
+        }
+
+        public function ReceiveData($JSONString)
+        {
+            $data = json_decode($JSONString, true);
+
+            if ($data === null) {
+                $this->SendDebug("ReceiveData", "❌ Invalid JSON data received!", 0);
+                return;
+            }
+            $this->SendDebug(__FUNCTION__, $JSONString, 0);
+        }
+
+        public function RequestAction($Ident, $Value)
+        {
+            switch ($Ident) {
+                case 'Command':
+                    $this->SendCommandByIndex((int)$Value);
+                    break;
+
+                default:
+                    throw new Exception('Invalid Ident: ' . $Ident);
+            }
+        }
+
+        private function EnsureCommandProfileAndVariable(): void
+        {
+            $profile = 'HKH.Commands.' . $this->InstanceID;
+
+            // Debug: verify translations and current varSettings
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'Start - deviceType=' . $this->ReadPropertyString('deviceType'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'varSettings(raw)=' . $this->ReadPropertyString('varSettings'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Command)=' . $this->Translate('Command'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Last Command (Name))=' . $this->Translate('Last Command (Name)'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Last Command (Alias))=' . $this->Translate('Last Command (Alias)'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Last Command (Index))=' . $this->Translate('Last Command (Index)'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Last Sent (Time))=' . $this->Translate('Last Sent (Time)'), 0);
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'T(Current State (Alias))=' . $this->Translate('Current State (Alias)'), 0);
+            $captionMap = $this->GetVarCaptionMap();
+            $this->SendDebug('EnsureCommandProfileAndVariable', 'captionMap=' . json_encode($captionMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0);
+
+            if (IPS_VariableProfileExists($profile)) {
+                IPS_DeleteVariableProfile($profile);
+            }
+
+            IPS_CreateVariableProfile($profile, 1); // integer
+            IPS_SetVariableProfileText($profile, '', '');
+
+            $type = strtoupper($this->ReadPropertyString('deviceType'));
+
+            $rows = $type === 'RF'
+                ? json_decode($this->ReadPropertyString('rfCommands'), true)
+                : json_decode($this->ReadPropertyString('commands'), true);
+            if (!is_array($rows)) {
+                $rows = [];
+            }
+
+            $i = 0;
+            foreach ($rows as $row) {
+                $name = '';
+                $alias = '';
+                if (is_array($row)) {
+                    if (isset($row['CommandName'])) {
+                        $name = (string)$row['CommandName'];
+                    }
+                    if (isset($row['CommandAlias'])) {
+                        $alias = trim((string)$row['CommandAlias']);
+                    }
+                }
+                if ($name === '') {
+                    $name = 'Cmd ' . $i;
+                }
+
+                // Prefer alias in dropdown if present
+                $label = $alias !== '' ? ($alias . ' (' . $name . ')') : $name;
+                IPS_SetVariableProfileAssociation($profile, $i, $label, '', 0);
+                $i++;
+            }
+
+            // Variable selection
+            $enabled = $this->GetVarEnabledMap();
+
+            // Command selector (action)
+            if (($enabled['Command'] ?? true) === true) {
+                $caption = $captionMap['Command'] ?? $this->Translate('Command');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: Command => ' . $caption, 0);
+                $this->RegisterVariableInteger('Command', $caption, $profile, 1);
+                $this->EnsureVariableCaption('Command', $caption);
+                $vid = @($this->GetIDForIdent('Command'));
+                if ($vid > 0 && @IPS_VariableExists($vid)) {
+                    $this->SendDebug('EnsureCommandProfileAndVariable', 'Variable created/exists: Command VID=' . $vid . ' Name=' . IPS_GetName($vid), 0);
+                }
+                $this->EnableAction('Command');
+            } else {
+                $this->UnregisterVariableIfExists('Command');
+            }
+
+            // Meta / Status
+            if (($enabled['LastCommandName'] ?? true) === true) {
+                $caption = $captionMap['LastCommandName'] ?? $this->Translate('Last Command (Name)');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: LastCommandName => ' . $caption, 0);
+                $this->RegisterVariableString('LastCommandName', $caption, '', 10);
+                $this->EnsureVariableCaption('LastCommandName', $caption);
+            } else {
+                $this->UnregisterVariableIfExists('LastCommandName');
+            }
+
+            if (($enabled['LastCommandAlias'] ?? true) === true) {
+                $caption = $captionMap['LastCommandAlias'] ?? $this->Translate('Last Command (Alias)');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: LastCommandAlias => ' . $caption, 0);
+                $this->RegisterVariableString('LastCommandAlias', $caption, '', 11);
+                $this->EnsureVariableCaption('LastCommandAlias', $caption);
+            } else {
+                $this->UnregisterVariableIfExists('LastCommandAlias');
+            }
+
+            if (($enabled['LastCommandIndex'] ?? true) === true) {
+                $caption = $captionMap['LastCommandIndex'] ?? $this->Translate('Last Command (Index)');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: LastCommandIndex => ' . $caption, 0);
+                $this->RegisterVariableInteger('LastCommandIndex', $caption, '', 12);
+                $this->EnsureVariableCaption('LastCommandIndex', $caption);
+            } else {
+                $this->UnregisterVariableIfExists('LastCommandIndex');
+            }
+
+            if (($enabled['LastCommandSentAt'] ?? true) === true) {
+                $caption = $captionMap['LastCommandSentAt'] ?? $this->Translate('Last Sent (Time)');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: LastCommandSentAt => ' . $caption, 0);
+                $this->RegisterVariableInteger('LastCommandSentAt', $caption, '~UnixTimestamp', 13);
+                $this->EnsureVariableCaption('LastCommandSentAt', $caption);
+            } else {
+                $this->UnregisterVariableIfExists('LastCommandSentAt');
+            }
+
+            if (($enabled['CurrentAlias'] ?? true) === true) {
+                $caption = $captionMap['CurrentAlias'] ?? $this->Translate('Current State (Alias)');
+                $this->SendDebug('EnsureCommandProfileAndVariable', 'RegisterVariable: CurrentAlias => ' . $caption, 0);
+                $this->RegisterVariableString('CurrentAlias', $caption, '', 14);
+                $this->EnsureVariableCaption('CurrentAlias', $caption);
+            } else {
+                $this->UnregisterVariableIfExists('CurrentAlias');
+            }
+        }
+
+        /**
+         * Ensure the variable exists and (re)apply the translated name.
+         * RegisterVariable* does not rename an existing variable automatically.
+         */
+        private function EnsureVariableCaption(string $ident, string $caption): void
+        {
+            try {
+                $vid = @$this->GetIDForIdent($ident);
+                if ($vid > 0 && @IPS_VariableExists($vid)) {
+                    IPS_SetName($vid, $caption);
+                }
+            } catch (Throwable $e) {
+                // ignore
+            }
+        }
+
+        private function SendCommandByIndex(int $index): void
+        {
+            $type = strtoupper($this->ReadPropertyString('deviceType'));
+
+            $rows = $type === 'RF'
+                ? json_decode($this->ReadPropertyString('rfCommands'), true)
+                : json_decode($this->ReadPropertyString('commands'), true);
+
+            if (!is_array($rows) || !isset($rows[$index]) || !is_array($rows[$index])) {
+                throw new Exception('Invalid command index: ' . $index);
+            }
+
+            $row = $rows[$index];
+
+            $cmdName = (string)($row['CommandName'] ?? ('Cmd ' . $index));
+            $cmdAlias = '';
+            if (isset($row['CommandAlias'])) {
+                $cmdAlias = trim((string)$row['CommandAlias']);
+            }
+
+            $this->SendDebug('SendCommandByIndex', 'Triggered command index=' . $index . ' name=' . $cmdName . ' alias=' . $cmdAlias . ' deviceType=' . $type, 0);
+
+            $enabled = $this->GetVarEnabledMap();
+
+            // Store last command meta (even if IR has no feedback)
+            if (($enabled['LastCommandName'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandName'))) {
+                SetValueString($this->GetIDForIdent('LastCommandName'), $cmdName);
+            }
+            if (($enabled['LastCommandAlias'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandAlias'))) {
+                SetValueString($this->GetIDForIdent('LastCommandAlias'), $cmdAlias);
+            }
+            if (($enabled['LastCommandIndex'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandIndex'))) {
+                SetValueInteger($this->GetIDForIdent('LastCommandIndex'), $index);
+            }
+            if (($enabled['LastCommandSentAt'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandSentAt'))) {
+                SetValueInteger($this->GetIDForIdent('LastCommandSentAt'), time());
+            }
+            if (($enabled['CurrentAlias'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('CurrentAlias'))) {
+                // For simple devices like a screen, treat the last alias as the current assumed state
+                SetValueString($this->GetIDForIdent('CurrentAlias'), $cmdAlias);
+            }
+
+            $repeat = isset($row['Repetition']) ? (int)$row['Repetition'] : 1;
+            if ($repeat < 1) {
+                $repeat = 1;
+            }
+
+            if ($type === 'RF') {
+
+                $payload = [
+                    'type' => 'rf',
+                    'deviceInstanceId' => $this->InstanceID,
+                    'deviceName' => $this->ReadPropertyString('name'),
+                    'commandIndex' => $index,
+                    'commandName' => $cmdName,
+                    'code' => (int)($row['Code'] ?? 0),
+                    'bits' => (int)($row['Bits'] ?? 24),
+                    'protocol' => (int)($row['Protocol'] ?? 1),
+                    'repeat' => $repeat
+                ];
+
+            } else {
+
+                $csv = isset($row['Command']) ? trim((string)$row['Command']) : '';
+                if ($csv === '') {
+                    throw new Exception('IR Command CSV is empty for index: ' . $index);
+                }
+
+                $payload = [
+                    'type' => 'ir',
+                    'deviceInstanceId' => $this->InstanceID,
+                    'deviceName' => $this->ReadPropertyString('name'),
+                    'commandIndex' => $index,
+                    'commandName' => $cmdName,
+                    'codeFormat' => 'RAW',
+                    'frequency' => (int)$this->ReadPropertyInteger('frequency'),
+                    'duty' => 33,
+                    'repeat' => $repeat,
+                    'code' => $csv
+                ];
+            }
+
+            // Keep payload readable in debug (do not spam with huge IR CSV)
+            $payloadForDebug = $payload;
+            if (isset($payloadForDebug['code']) && is_string($payloadForDebug['code']) && strlen($payloadForDebug['code']) > 120) {
+                $payloadForDebug['code'] = substr($payloadForDebug['code'], 0, 120) . '...(' . strlen($payloadForDebug['code']) . ' chars)';
+            }
+            $this->SendDebug('SendCommandByIndex', 'Sending payload to parent: ' . json_encode($payloadForDebug, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0);
+
+            $res = $this->ForwardCommandToParent($payload);
+            $this->SendDebug('SendCommandByIndex', 'Forward result: ' . json_encode($res, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0);
+        }
+
+        public function SendCommandByName(string $commandName): void
+        {
+            $commandName = trim($commandName);
+            if ($commandName === '') {
+                throw new Exception('Command name is empty');
+            }
+            $this->SendDebug('SendCommandByName', 'Called with commandName="' . $commandName . '" on InstanceID=' . $this->InstanceID, 0);
+
+            $rows = json_decode($this->ReadPropertyString('commands'), true);
+            if (!is_array($rows)) {
+                throw new Exception('Commands list is invalid');
+            }
+
+            foreach ($rows as $idx => $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $name = isset($row['CommandName']) ? trim((string)$row['CommandName']) : '';
+                if (strcasecmp($name, $commandName) === 0) {
+                    $this->SendDebug('SendCommandByName', 'Resolved commandName="' . $commandName . '" to index=' . (int)$idx, 0);
+                    $this->SendCommandByIndex((int)$idx);
+                    return;
+                }
+            }
+
+            $this->SendDebug('SendCommandByName', 'Command not found in commands list: "' . $commandName . '"', 0);
+            throw new Exception('Command not found: ' . $commandName);
+        }
+
+        /**
+         * Creates one IP-Symcon script per command entry of this device instance.
+         * Scripts will be created/updated under the selected category.
+         *
+         * Each generated script simply calls CRSXKD_SendCommandByName(<instanceId>, <commandName>).
+         */
+        public function CreateCommandScripts(int $categoryId = 0): void
+        {
+            if ($categoryId <= 0) {
+                $categoryId = (int)$this->ReadPropertyInteger('scriptCategory');
+            }
+
+            if ($categoryId <= 0 || !IPS_CategoryExists($categoryId)) {
+                throw new Exception('Ungültige Zielkategorie (scriptCategory). Bitte im Formular eine Kategorie auswählen.');
+            }
+
+            $type = strtoupper($this->ReadPropertyString('deviceType'));
+            $rows = $type === 'RF'
+                ? json_decode($this->ReadPropertyString('rfCommands'), true)
+                : json_decode($this->ReadPropertyString('commands'), true);
+
+            if (!is_array($rows)) {
+                throw new Exception('Commands list is invalid');
+            }
+
+            $deviceName = trim($this->ReadPropertyString('name'));
+            if ($deviceName === '') {
+                $deviceName = 'Kincony Device ' . $this->InstanceID;
+            }
+
+            $created = 0;
+            $updated = 0;
+            $skipped = 0;
+
+            foreach ($rows as $idx => $row) {
+                if (!is_array($row)) {
+                    $skipped++;
+                    continue;
+                }
+
+                $cmdName = isset($row['CommandName']) ? trim((string)$row['CommandName']) : '';
+                if ($cmdName === '') {
+                    // Fallback: avoid empty script names
+                    $cmdName = 'Cmd_' . (int)$idx;
+                }
+
+                $scriptName = $this->SanitizeObjectName($deviceName . ' - ' . $cmdName);
+
+                $existing = @IPS_GetObjectIDByName($scriptName, $categoryId);
+                $isNew = false;
+
+                if ($existing === false || $existing === 0) {
+                    $scriptId = IPS_CreateScript(0); // PHP
+                    IPS_SetParent($scriptId, $categoryId);
+                    IPS_SetName($scriptId, $scriptName);
+                    $isNew = true;
+                } else {
+                    $scriptId = (int)$existing;
+                    if (!IPS_ScriptExists($scriptId)) {
+                        $scriptId = IPS_CreateScript(0);
+                        IPS_SetParent($scriptId, $categoryId);
+                        IPS_SetName($scriptId, $scriptName);
+                        $isNew = true;
+                    }
+                }
+
+                $content = $this->BuildCommandScriptContent($cmdName);
+                IPS_SetScriptContent($scriptId, $content);
+
+                if ($isNew) {
+                    $created++;
+                } else {
+                    $updated++;
+                }
+            }
+
+            $msg = sprintf('Skripterstellung abgeschlossen. Created=%d, Updated=%d, Skipped=%d, CategoryID=%d', $created, $updated, $skipped, $categoryId);
+            $this->SendDebug('CreateCommandScripts', $msg, 0);
+        }
+
+        /**
+         * Returns caption map from current varSettings: Ident => Caption
+         * Note: varSettings captions are already translated during NormalizeVarSettings.
+         */
+        private function GetVarCaptionMap(): array
+        {
+            $rows = json_decode($this->ReadPropertyString('varSettings'), true);
+            if (!is_array($rows)) {
+                return [];
+            }
+
+            $map = [];
+            foreach ($rows as $row) {
+                if (!is_array($row) || !isset($row['Ident'])) {
+                    continue;
+                }
+                $ident = (string)$row['Ident'];
+                $caption = isset($row['Caption']) ? (string)$row['Caption'] : '';
+                if ($caption !== '') {
+                    $map[$ident] = $caption;
+                }
+            }
+            return $map;
+        }
+
+        /**
+         * Returns the list of variables that the instance can create.
+         */
+        private function GetAvailableVariables(): array
+        {
+            return [
+                ['Ident' => 'Command',           'Caption' => 'Command (Selector/Action)'],
+                ['Ident' => 'LastCommandName',   'Caption' => 'Last Command (Name)'],
+                ['Ident' => 'LastCommandAlias',  'Caption' => 'Last Command (Alias)'],
+                ['Ident' => 'LastCommandIndex',  'Caption' => 'Last Command (Index)'],
+                ['Ident' => 'LastCommandSentAt', 'Caption' => 'Last Sent (Time)'],
+                ['Ident' => 'CurrentAlias',      'Caption' => 'Current State (Alias)']
+            ];
+        }
+
+        /**
+         * Ensures that the property varSettings contains rows for all available variables.
+         * Default: all enabled.
+         */
+        private function NormalizeVarSettings(): void
+        {
+            $current = json_decode($this->ReadPropertyString('varSettings'), true);
+            $this->SendDebug('NormalizeVarSettings', 'Current(raw)=' . $this->ReadPropertyString('varSettings'), 0);
+            if (!is_array($current)) {
+                $current = [];
+            }
+
+            // map existing by Ident
+            $map = [];
+            foreach ($current as $row) {
+                if (is_array($row) && isset($row['Ident'])) {
+                    $map[(string)$row['Ident']] = $row;
+                }
+            }
+
+            $normalized = [];
+            foreach ($this->GetAvailableVariables() as $v) {
+                $ident = (string)$v['Ident'];
+                $caption = $this->Translate((string)$v['Caption']);
+
+                $enabled = true;
+                if (isset($map[$ident]) && is_array($map[$ident]) && array_key_exists('Enabled', $map[$ident])) {
+                    $enabled = (bool)$map[$ident]['Enabled'];
+                }
+
+                $normalized[] = [
+                    'Ident' => $ident,
+                    'Caption' => $caption,
+                    'Enabled' => $enabled
+                ];
+            }
+
+            // Only write back if changed (avoid endless ApplyChanges loops)
+            $this->SendDebug('NormalizeVarSettings', 'Normalized=' . json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0);
+            if (json_encode($normalized) !== json_encode($current)) {
+                IPS_SetProperty($this->InstanceID, 'varSettings', json_encode($normalized));
+                // do not call IPS_ApplyChanges here; ApplyChanges already running
+            }
+        }
+
+        /**
+         * Returns enabled map: Ident => bool
+         */
+        private function GetVarEnabledMap(): array
+        {
+            $rows = json_decode($this->ReadPropertyString('varSettings'), true);
+            if (!is_array($rows) || count($rows) === 0) {
+                // default: all enabled
+                $rows = [];
+                foreach ($this->GetAvailableVariables() as $v) {
+                    $rows[] = ['Ident' => (string)$v['Ident'], 'Enabled' => true];
+                }
+            }
+
+            $map = [];
+            foreach ($rows as $row) {
+                if (!is_array($row) || !isset($row['Ident'])) {
+                    continue;
+                }
+                $map[(string)$row['Ident']] = isset($row['Enabled']) ? (bool)$row['Enabled'] : true;
+            }
+            return $map;
+        }
+
+        /**
+         * Unregisters a variable if it exists (used when user disables it).
+         */
+        private function UnregisterVariableIfExists(string $ident): void
+        {
+            try {
+                $vid = @$this->GetIDForIdent($ident);
+                if ($vid > 0 && @IPS_VariableExists($vid)) {
+                    $this->UnregisterVariable($ident);
+                }
+            } catch (Throwable $e) {
+                // ignore
+            }
+        }
+
+        /**
+         * Export this device definition to a JSON file under /media and return the file path.
+         */
+        public function ExportDeviceDefinition(): string
+        {
+            $export = [
+                'version' => 1,
+                'exportedAt' => time(),
+                'deviceType' => $this->ReadPropertyString('deviceType'),
+                'name' => $this->ReadPropertyString('name'),
+                'frequency' => (int)$this->ReadPropertyInteger('frequency'),
+                'codeFormat' => $this->ReadPropertyString('codeFormat'),
+                'commands' => json_decode($this->ReadPropertyString('commands'), true),
+                'rfCommands' => json_decode($this->ReadPropertyString('rfCommands'), true)
+            ];
+
+            if ($this->ReadPropertyBoolean('exportIncludeMeta')) {
+                $export['varSettings'] = json_decode($this->ReadPropertyString('varSettings'), true);
+            }
+
+            $json = json_encode($export, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($json === false) {
+                throw new Exception('Export JSON encoding failed');
+            }
+
+            $dir = IPS_GetKernelDir() . 'media/KinconyExports/';
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0775, true);
+            }
+
+            $fileName = 'KinconyDevice_' . $this->InstanceID . '_' . date('Ymd_His') . '.json';
+            $file = $dir . $fileName;
+
+            file_put_contents($file, $json);
+
+            // Store last export file for later use
+            $this->WriteAttributeString('lastExportFile', $fileName);
+
+            // Ask parent to build the full download URL (hook + secret + file)
+            $fullUrl = $this->RequestDownloadUrlFromParent($fileName);
+            if ($fullUrl !== '') {
+                $this->WriteAttributeString('lastExportUrl', $fullUrl);
+                // Update the form label immediately (if form is open)
+                $this->UpdateFormField('ExportDownloadLink', 'caption', 'Export download link: ' . $fullUrl);
+            } else {
+                $this->WriteAttributeString('lastExportUrl', '');
+                $this->UpdateFormField('ExportDownloadLink', 'caption', 'Export download link: (not available yet - splitter not updated)');
+            }
+
+            $relativeUrl = '/media/KinconyExports/' . $fileName;
+
+            // Hinweis: funktioniert nur, wenn dein Symcon-Webserver /media ausliefert (typisch: localhost:3777)
+            $msg = "✅ Export gespeichert:\n" .
+                $file . "\n\n" .
+                (($fullUrl !== '') ? ("Download-URL (voll):\n" . $fullUrl . "\n\n") : "") .
+                "Download-URL (relativ):\n" .
+                $relativeUrl;
+
+            $this->LogMessage($msg, KL_NOTIFY);
+            $this->SendDebug('ExportDeviceDefinition', $msg, 0);
+
+            // Show a popup with the export result (download path)
+            // Text setzen
+            // $this->UpdateFormField('ExportResultPopup', 'caption', "Export abgeschlossen");
+            $this->UpdateFormField('ExportResultText', 'caption', $msg);
+
+            // Popup öffnen
+            $this->UpdateFormField('ExportResultPopup', 'visible', true);
+
+            // Rückgabe (falls per Konsole/Debug genutzt)
+            return $msg;
+        }
+
+        public function CloseExportPopup(): void
+        {
+            // Close popup if open and prevent it from reopening next time the form is opened
+            $this->UpdateFormField('ExportResultPopup', 'visible', false);
+        }
+
+        /**
+         * Import a device definition JSON file and write its content into this instance.
+         * Supports file path, MediaID, or base64-encoded file content (as returned by SelectFile).
+         */
+        public function ImportDeviceDefinition(string $filePath = ''): void
+        {
+            if ($filePath === '') {
+                $filePath = (string)$this->ReadPropertyString('importFile');
+            }
+            $filePath = trim($filePath);
+            if ($filePath === '') {
+                throw new Exception('Keine Import-Datei gewählt.');
+            }
+
+            $raw = '';
+
+            // 1) If SelectFile returns a MediaID (numeric), load media content
+            if (ctype_digit($filePath)) {
+                $mid = (int)$filePath;
+                if (@IPS_MediaExists($mid)) {
+                    $content = IPS_GetMediaContent($mid);
+                    // Media content is base64 encoded
+                    $decoded = base64_decode($content, true);
+                    if ($decoded !== false) {
+                        $raw = $decoded;
+                    }
+                }
+            }
+
+            // 2) If it looks like a real file path and exists, read it
+            if ($raw === '' && file_exists($filePath)) {
+                $tmp = file_get_contents($filePath);
+                if ($tmp !== false) {
+                    $raw = $tmp;
+                }
+            }
+
+            // 3) If SelectFile returns base64 encoded content directly (often starts with "ew" for "{")
+            if ($raw === '') {
+                $decoded = base64_decode($filePath, true);
+                if ($decoded !== false) {
+                    $raw = $decoded;
+                }
+            }
+
+            // 4) If nothing worked yet, treat the input as raw JSON (rare)
+            if ($raw === '' && (strpos($filePath, '{') !== false || strpos($filePath, '[') !== false)) {
+                $raw = $filePath;
+            }
+
+            if ($raw === '') {
+                throw new Exception('Import-Datei konnte nicht geladen werden (Pfad/Media/Base64). Wert: ' . $filePath);
+            }
+
+            $data = json_decode($raw, true);
+            if (!is_array($data)) {
+                throw new Exception('Import-Datei enthält kein gültiges JSON.');
+            }
+
+            // Only apply known keys
+            if (isset($data['deviceType'])) {
+                IPS_SetProperty($this->InstanceID, 'deviceType', (string)$data['deviceType']);
+            }
+            if (isset($data['name'])) {
+                IPS_SetProperty($this->InstanceID, 'name', (string)$data['name']);
+            }
+            if (isset($data['frequency'])) {
+                IPS_SetProperty($this->InstanceID, 'frequency', (int)$data['frequency']);
+            }
+            if (isset($data['codeFormat'])) {
+                IPS_SetProperty($this->InstanceID, 'codeFormat', (string)$data['codeFormat']);
+            }
+            if (array_key_exists('commands', $data)) {
+                IPS_SetProperty($this->InstanceID, 'commands', json_encode($data['commands'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            }
+            if (array_key_exists('rfCommands', $data)) {
+                IPS_SetProperty($this->InstanceID, 'rfCommands', json_encode($data['rfCommands'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            }
+            if (isset($data['varSettings']) && is_array($data['varSettings'])) {
+                IPS_SetProperty($this->InstanceID, 'varSettings', json_encode($data['varSettings'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            }
+
+            IPS_ApplyChanges($this->InstanceID);
+            $this->SendDebug('ImportDeviceDefinition', 'Imported from ' . $filePath, 0);
+        }
+
+        /**
+         * Helper: build script body for a single command name.
+         */
+        private function BuildCommandScriptContent(string $commandName): string
+        {
+            $commandNameEsc = addslashes($commandName);
+            $instanceId = $this->InstanceID;
+
+            return "<?php\n\n" .
+                "// Auto-generated by HaptiqueKinconyDevice (#{$instanceId})\n" .
+                "// Command: {$commandNameEsc}\n\n" .
+                "if (!function_exists('CRSXKD_SendCommandByName')) {\n" .
+                "    throw new Exception('CRSXKD_SendCommandByName() not found. Is the module installed/loaded?');\n" .
+                "}\n\n" .
+                "CRSXKD_SendCommandByName({$instanceId}, \"{$commandNameEsc}\");\n";
+        }
+
+        /**
+         * Helper: keep script/object names valid and reasonably short.
+         */
+        private function SanitizeObjectName(string $name): string
+        {
+            $name = trim($name);
+
+            // Replace problematic characters without regex delimiter pitfalls
+            $invalidChars = [
+                "\\", "/", ":", "*", "?", '"', "<", ">", "|"
+            ];
+            $name = str_replace($invalidChars, ' ', $name);
+
+            // Normalize control chars and whitespace
+            $name = preg_replace('~[\r\n\t]+~', ' ', (string)$name);
+            $name = preg_replace('~\s+~', ' ', (string)$name);
+            $name = trim((string)$name);
+
+            // IP-Symcon object names are typically safe up to ~255 chars; keep a conservative limit
+            if (strlen($name) > 120) {
+                $name = substr($name, 0, 120);
+            }
+
+            return $name;
+        }
+
+        private function BuildManufacturerCsv(array $rows): string
+        {
+            $fp = fopen('php://temp', 'r+');
+
+            // Header exakt wie Hersteller
+            fputcsv($fp, ['Category','Brand','Model Number','Frequency','Control Name','Control IR Data']);
+
+            // Optional: Gruppierung nach Device (Category+Brand+Model+Frequency)
+            $lastKey = null;
+
+            foreach ($rows as $r) {
+                $category = trim((string)($r['Category'] ?? ''));
+                $brand    = trim((string)($r['Brand'] ?? ''));
+                $model    = trim((string)($r['ModelNumber'] ?? $r['Model Number'] ?? ''));
+                $freq     = trim((string)($r['Frequency'] ?? ''));
+                $name     = trim((string)($r['ControlName'] ?? $r['Control Name'] ?? ''));
+                $ir       = (string)($r['ControlIRData'] ?? $r['Control IR Data'] ?? '');
+
+                // IR-Daten normalisieren (z.B. Leerzeichen raus)
+                $ir = preg_replace('/\s+/', '', $ir ?? '');
+
+                $key = $category . '|' . $brand . '|' . $model . '|' . $freq;
+
+                // Wie im Beispiel: Leerblock zwischen Geräten
+                if ($lastKey !== null && $key !== $lastKey) {
+                    fputcsv($fp, ['', '', '', '', '', '']); // ergibt ",,,,,"
+                    // manche Beispiele haben sogar zwei Leerzeilen – wenn du willst:
+                    // fputcsv($fp, ['', '', '', '', '', '']);
+                }
+                $lastKey = $key;
+
+                fputcsv($fp, [$category, $brand, $model, $freq, $name, $ir]);
+            }
+
+            rewind($fp);
+            $csv = stream_get_contents($fp);
+            fclose($fp);
+
+            // Sicherstellen: UTF-8 ohne BOM (normalerweise ok)
+            return $csv;
+        }
+
+        public function ExportIRCsv(): string
+        {
+            $writeToFile = true;
+
+            // HIER den Namen deiner Property anpassen:
+            $json = $this->ReadPropertyString('IRCommands');
+
+            $rows = json_decode($json, true);
+            if (!is_array($rows)) {
+                throw new Exception('IRCommands ist kein gültiges JSON-Array.');
+            }
+
+            $csv = $this->BuildManufacturerCsv($rows);
+
+            if ($writeToFile) {
+                $file = IPS_GetKernelDir() . 'media/IR_Export_' . $this->InstanceID . '.csv';
+                file_put_contents($file, $csv);
+                $this->SendDebug('CSV Export', 'Wrote ' . strlen($csv) . ' bytes to ' . $file, 0);
+            }
+
+            return $csv;
+        }
+
+        public function UpdateFormVisibility(): void
+        {
+            $type = $this->ReadPropertyString('deviceType');
+            $type = strtoupper(trim($type));
+            $isIR = ($type !== 'RF');
+            $isRF = ($type === 'RF');
+
+            // IR Felder
+            $this->UpdateFormField('frequency', 'visible', $isIR);
+            $this->UpdateFormField('codeFormat', 'visible', $isIR);
+            $this->UpdateFormField('commands', 'visible', $isIR);
+
+            // RF Felder
+            $this->UpdateFormField('rfCommands', 'visible', $isRF);
+        }
+
+        private function GetVarSettingsRowsForForm(): array
+        {
+            $rows = json_decode($this->ReadPropertyString('varSettings'), true);
+            if (is_array($rows) && count($rows) > 0) {
+                return $rows;
+            }
+
+            // Fallback: Default = alle Variablen aktiv
+            $out = [];
+            foreach ($this->GetAvailableVariables() as $v) {
+                $out[] = [
+                    'Ident'   => (string)$v['Ident'],
+                    'Caption' => $this->Translate((string)$v['Caption']),
+                    'Enabled' => true
+                ];
+            }
+            return $out;
+        }
+
+
+        public function GetConfigurationForm()
+        {
+            $Form = json_encode([
+                'elements' => $this->FormElements(),
+                'actions' => $this->FormActions(),
+                'status' => $this->FormStatus()
+            ]);
+
+            $this->SendDebug('FORM', $Form, 0);
+            return $Form;
+        }
+
+        /**
+         * Definiert die Formularelemente für die Konfiguration.
+         *
+         * @return array
+         */
+        protected function FormElements(): array
+        {
+            return [
+                [
+                    'type' => 'RowLayout',
+                    'items' => [
+                        [
+                            'type' => 'Image',
+                            'name' => 'CantataLogo',
+                            'image' => 'data:image/svg+xml;base64, PHN2ZyB3aWR0aD0iMTU4IiBoZWlnaHQ9IjU2IiB2aWV3Qm94PSIwIDAgMTU4IDU2IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZD0iTTQ2LjU1NjUgNDguMjczQzQ0LjQ3NTkgNTAuMTcxNiA0Mi4xODcyIDUxLjcwNiAzOS43Njg0IDUyLjg1MDRDMzkuNTg2NCA1Mi45NTQ0IDM5LjM1MjMgNTIuODUwNCAzOS4yNzQzIDUyLjY0MjNMMzIuMDE4MSAzNS4yNDMxQzMxLjk2NjEgMzUuMTEzIDMyLjAxODEgMzQuOTU3IDMyLjE0ODEgMzQuOTA1QzMyLjQwODIgMzQuNzQ4OSAzMi42NjgzIDM0LjU2NjkgMzIuOTI4NCAzNC4zODQ4QzMzLjAzMjQgMzQuMzA2OCAzMy4xODg1IDM0LjMwNjggMzMuMjkyNSAzNC40MTA4TDQ2LjYwODUgNDcuNzI2OEM0Ni43MTI1IDQ3Ljg4MjkgNDYuNzEyNSA0OC4xNDMgNDYuNTU2NSA0OC4yNzNaTTMwLjI3NTYgMzUuOTk3M0MzMC4yMjM2IDM1Ljg2NzMgMzAuMDY3NSAzNS43ODkyIDI5LjkzNzUgMzUuODQxM0MyOS42MjU0IDM1LjkxOTMgMjkuMzEzMyAzNS45OTczIDI5LjAyNzIgMzYuMDQ5M0MyOC44OTcyIDM2LjA3NTMgMjguNzkzMSAzNi4xNzk0IDI4Ljc5MzEgMzYuMzM1NEwyOC44NDUyIDU1LjE5MTFDMjguODQ1MiA1NS4zOTkxIDI5LjAyNzIgNTUuNTgxMiAyOS4yMzUzIDU1LjU1NTJDMzEuOTE0MSA1NS40MjUxIDM0LjYxODkgNTQuODc5IDM3LjI3MTcgNTMuOTE2N0MzNy40Nzk4IDUzLjgzODcgMzcuNTU3OCA1My42MzA2IDM3LjQ3OTcgNTMuNDIyNUwzMC4yNzU2IDM1Ljk5NzNaTTI2LjcxMjUgMzYuMDQ5M0MyNi40MDA0IDM2LjAyMzMgMjYuMDg4MyAzNS45NDUzIDI1Ljc3NjIgMzUuODY3M0MyNS42NDYyIDM1Ljg0MTMgMjUuNDkwMSAzNS44OTMzIDI1LjQzODEgMzYuMDIzM0wxOC4yNiA1My40NzQ2QzE4LjE4MTkgNTMuNjgyNiAxOC4yODYgNTMuODkwNyAxOC40NjggNTMuOTY4N0MyMS4wMTY4IDU0Ljg3OSAyMy42OTU2IDU1LjM5OTEgMjYuNTMwNSA1NS41MjkyQzI2LjczODUgNTUuNTI5MiAyNi45MjA2IDU1LjM3MzEgMjYuOTIwNiA1NS4xNjUxVjM2LjMzNTRDMjYuOTQ2NiAzNi4yMDU0IDI2Ljg0MjYgMzYuMDc1MyAyNi43MTI1IDM2LjA0OTNaTTIzLjYxNzYgMzUuMDA5QzIzLjMzMTUgMzQuODUzIDIzLjA3MTQgMzQuNjcwOSAyMi44Mzc0IDM0LjQ4ODlDMjIuNzMzMyAzNC40MTA4IDIyLjU3NzMgMzQuNDEwOCAyMi40NzMyIDM0LjUxNDlMOS4xODMyNSA0Ny44ODI5QzkuMDI3MiA0OC4wMzg5IDkuMDI3MiA0OC4yNzMgOS4yMDkyNSA0OC40MjlDMTEuMjExOSA1MC4yMjM2IDEzLjUwMDUgNTEuNzU4IDE2LjA0OTMgNTIuOTU0NEMxNi4yMzE0IDUzLjAzMjQgMTYuNDY1NCA1Mi45NTQ0IDE2LjU0MzUgNTIuNzQ2M0wyMy43NzM2IDM1LjM0NzFDMjMuNzk5NiAzNS4yNDMxIDIzLjc0NzYgMzUuMDg3IDIzLjYxNzYgMzUuMDA5Wk0yMS4xNzI5IDMyLjg3NjRDMjAuOTY0OCAzMi42MTYzIDIwLjgwODcgMzIuMzU2MiAyMC42NTI3IDMyLjA5NjFDMjAuNTc0NyAzMS45NjYxIDIwLjQ0NDYgMzEuOTQwMSAyMC4zMTQ2IDMxLjk2NjFMMi45MTUzNiAzOS4yMjIzQzIuNzA3MyAzOS4zMDAzIDIuNjI5MjggMzkuNTM0NCAyLjcwNzMgMzkuNzE2NEMzLjg1MTY0IDQyLjEzNTIgNS4zODYxIDQ0LjQ0OTggNy4yODQ2NyA0Ni41MDQ1QzcuNDQwNzIgNDYuNjYwNSA3LjY3NDc5IDQ2LjY2MDUgNy44MzA4NCA0Ni41MDQ1TDIxLjE3MjkgMzMuMTg4NUMyMS4yNTA5IDMzLjEzNjQgMjEuMjUwOSAzMi45ODA0IDIxLjE3MjkgMzIuODc2NFpNMTkuNzE2NCAyOS45NjM1QzE5LjYzODQgMjkuNjUxNCAxOS41NjA0IDI5LjMzOTMgMTkuNTA4NCAyOS4wNTMyQzE5LjQ4MjMgMjguOTIzMiAxOS4zNzgzIDI4LjgxOTEgMTkuMjIyMyAyOC44MTkxTDAuMzY2NTk2IDI4Ljg3MTJDMC4xNTg1MzQgMjguODcxMiAtMC4wMjM1MjMyIDI5LjA1MzIgMC4wMDI0ODQ1OCAyOS4yNjEzQzAuMTMyNTI0IDMxLjk0MDEgMC42Nzg2ODkgMzQuNjQ0OSAxLjY0MDk4IDM3LjI5NzdDMS43MTkgMzcuNTA1OCAxLjkyNzA2IDM3LjU4MzggMi4xMzUxMiAzNy41MDU4TDE5LjUzNDQgMzAuMzAxNkMxOS42OTA0IDMwLjI0OTYgMTkuNzQyNCAzMC4wOTM1IDE5LjcxNjQgMjkuOTYzNVpNMC4zOTI2MDIgMjYuOTQ2NkgxOS4yMjIzQzE5LjM1MjMgMjYuOTQ2NiAxOS40ODIzIDI2Ljg0MjYgMTkuNTA4NCAyNi43MTI1QzE5LjUzNDQgMjYuNDAwNCAxOS42MTI0IDI2LjA4ODMgMTkuNjkwNCAyNS43NzYyQzE5LjcxNjQgMjUuNjQ2MiAxOS42NjQ0IDI1LjQ5MDEgMTkuNTM0NCAyNS40MzgxTDIuMDgzMTEgMTguMjZDMS44NzUwNSAxOC4xODE5IDEuNjY2OTkgMTguMjg2IDEuNTg4OTYgMTguNDY4QzAuNjc4NjkgMjEuMDE2OCAwLjE1ODUzMyAyMy42OTU2IDAuMDI4NDk0IDI2LjUzMDVDMC4wMDI0ODYxNyAyNi43NjQ1IDAuMTg0NTM5IDI2Ljk0NjYgMC4zOTI2MDIgMjYuOTQ2NlpNMi43ODUzMiAxNi41MTc0TDIwLjE4NDUgMjMuNzQ3NkMyMC4zMTQ2IDIzLjc5OTYgMjAuNDcwNiAyMy43NDc2IDIwLjU0ODcgMjMuNjE3NkMyMC43MDQ3IDIzLjMzMTUgMjAuODg2OCAyMy4wNzE0IDIxLjA2ODggMjIuODM3NEMyMS4xNDY4IDIyLjczMzMgMjEuMTQ2OCAyMi41NzczIDIxLjA0MjggMjIuNDczMkw3LjY3NDc5IDkuMTgzMjVDNy41MTg3NCA5LjAyNzIgNy4yODQ2OCA5LjAyNzIgNy4xMjg2MyA5LjIwOTI1QzUuMzM0MDkgMTEuMjExOSAzLjc5OTYzIDEzLjUwMDUgMi42MDMyNyAxNi4wNDkzQzIuNDk5MjQgMTYuMjA1NCAyLjYwMzI3IDE2LjQzOTQgMi43ODUzMiAxNi41MTc0Wk0yMi4zMTcyIDIxLjE0NjhDMjIuNDIxMiAyMS4yNTA5IDIyLjU3NzMgMjEuMjUwOSAyMi42ODEzIDIxLjE3MjlDMjIuOTQxNCAyMC45NjQ4IDIzLjIwMTUgMjAuODA4NyAyMy40NjE1IDIwLjYyNjdDMjMuNTkxNiAyMC41NDg3IDIzLjYxNzYgMjAuNDE4NiAyMy41OTE2IDIwLjI4ODZMMTYuMzM1NCAyLjg4OTM1QzE2LjI1NzQgMi42ODEyOSAxNi4wMjMzIDIuNjAzMjcgMTUuODQxMiAyLjY4MTI5QzEzLjQyMjUgMy44MjU2MyAxMS4xMDc4IDUuMzYwMSA5LjA1MzIxIDcuMjU4NjdDOC44OTcxNiA3LjQxNDcyIDguODk3MTYgNy42NDg3OCA5LjA1MzIxIDcuODA0ODNMMjIuMzE3MiAyMS4xNDY4Wk0yNS4yNTYxIDE5LjU2MDRDMjUuMzA4MSAxOS42OTA0IDI1LjQ2NDEgMTkuNzY4NCAyNS41OTQyIDE5LjcxNjRDMjUuOTA2MyAxOS42Mzg0IDI2LjIxODQgMTkuNTYwNCAyNi41MDQ1IDE5LjUwODNDMjYuNjM0NSAxOS40ODIzIDI2LjczODUgMTkuMzc4MyAyNi43Mzg1IDE5LjIyMjNMMjYuNjg2NSAwLjM2NjU5NkMyNi42ODY1IDAuMTU4NTM0IDI2LjUwNDQgLTAuMDIzNTIzMiAyNi4yOTY0IDAuMDAyNDg0NThDMjMuNjE3NiAwLjEzMjUyNCAyMC45MTI4IDAuNjc4Njg5IDE4LjI2IDEuNjQwOThDMTguMDUxOSAxLjcxOSAxNy45NzM5IDEuOTI3MDYgMTguMDUxOSAyLjEzNTEyTDI1LjI1NjEgMTkuNTYwNFpNMjkuNzgxNCAxOS42NjQ0QzI5LjkxMTUgMTkuNjkwNCAzMC4wNjc1IDE5LjYzODQgMzAuMTE5NSAxOS41MDgzTDM3LjI5NzcgMi4wNTcxQzM3LjM3NTcgMS44NDkwNCAzNy4yNzE3IDEuNjQwOTggMzcuMDg5NiAxLjU2Mjk1QzM0LjU0MDkgMC42NTI2OCAzMS44NjIxIDAuMTMyNTI0IDI5LjAyNzIgMC4wMDI0ODQ1OEMyOC44MTkxIDAuMDAyNDg0NTggMjguNjM3MSAwLjE1ODUzNCAyOC42MzcxIDAuMzY2NTk2VjE5LjE5NjNDMjguNjM3MSAxOS4zNTIzIDI4Ljc0MTEgMTkuNDU2MyAyOC44OTcyIDE5LjQ4MjNDMjkuMTU3MiAxOS41MzQ0IDI5LjQ2OTMgMTkuNjEyNCAyOS43ODE0IDE5LjY2NDRaTTMxLjk0MDEgMjAuNTQ4N0MzMi4yMjYyIDIwLjcwNDcgMzIuNDg2MyAyMC44ODY4IDMyLjcyMDMgMjEuMDY4OEMzMi44MjQ0IDIxLjE0NjggMzIuOTgwNCAyMS4xNDY4IDMzLjA4NDQgMjEuMDQyOEw0Ni4zNzQ0IDcuNjc0NzlDNDYuNTMwNSA3LjUxODc0IDQ2LjUzMDUgNy4yODQ2OCA0Ni4zNzQ0IDcuMTI4NjNDNDQuMzcxOCA1LjMzNDA5IDQyLjA4MzEgMy43OTk2MyAzOS41MzQ0IDIuNjAzMjdDMzkuMzUyMyAyLjUyNTI0IDM5LjExODIgMi42MDMyNyAzOS4wNDAyIDIuODExMzNMMzEuODEgMjAuMjEwNkMzMS43NTggMjAuMzE0NiAzMS44MSAyMC40NzA2IDMxLjk0MDEgMjAuNTQ4N1oiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl8xMDFfNjUpIi8+CjxwYXRoIGQ9Ik00NC4zOTc4IDU1LjU1NTJDNDQuMzQ1OCA1NS41MDMyIDQ0LjI2NzggNTUuNTAzMiA0NC4yMTU4IDU1LjQ3NzJDNDMuNjE3NiA1NS4yNjkxIDQzLjIwMTUgNTQuOTA1IDQyLjk5MzQgNTQuMzA2OEM0Mi41NzczIDUzLjE4ODUgNDMuMjc5NSA1MS45NjYxIDQ0LjQyMzggNTEuNzU4QzQ1LjQxMjEgNTEuNTc2IDQ2LjI3MDQgNTIuMTQ4MiA0Ni41ODI1IDUzLjAwNjRDNDYuNjA4NSA1My4xMTA1IDQ2LjYzNDUgNTMuMjE0NSA0Ni42NjA1IDUzLjMxODVDNDYuNjYwNSA1My4zNzA1IDQ2LjY4NjUgNTMuNDIyNSA0Ni42ODY1IDUzLjQ3NDZDNDYuNjg2NSA1My42MDQ2IDQ2LjY4NjUgNTMuNzM0NiA0Ni42ODY1IDUzLjg2NDdDNDYuNjg2NSA1My45MTY3IDQ2LjY2MDUgNTMuOTY4NyA0Ni42NjA1IDUzLjk5NDdDNDYuNjYwNSA1NC4wOTg3IDQ2LjYzNDUgNTQuMjAyOCA0Ni41ODI1IDU0LjMwNjhDNDYuMzQ4NCA1NC45MzEgNDUuOTA2MyA1NS4zMjExIDQ1LjI1NjEgNTUuNTAzMkM0NS4yMDQxIDU1LjUwMzIgNDUuMTc4MSA1NS41MjkyIDQ1LjEyNjEgNTUuNTU1MkM0NC44NjYgNTUuNTU1MiA0NC42MzE5IDU1LjU1NTIgNDQuMzk3OCA1NS41NTUyWk00Ni4zNzQ0IDUzLjY1NjZDNDYuNDAwNCA1Mi44NTA0IDQ1Ljc1MDIgNTIuMDQ0MSA0NC43ODc5IDUyLjAxODFDNDMuOTAzNyA1Mi4wMTgxIDQzLjE3NTUgNTIuNzIwMyA0My4xNzU1IDUzLjYzMDZDNDMuMTc1NSA1NC42MTg5IDQzLjk4MTcgNTUuMjQzMSA0NC43NjE5IDU1LjI0MzFDNDUuNjQ2MiA1NS4yNjkxIDQ2LjM3NDQgNTQuNTQwOSA0Ni4zNzQ0IDUzLjY1NjZaIiBmaWxsPSIjRkJCMDNDIi8+CjxwYXRoIGQ9Ik00NC4xNjM4IDUyLjc5ODRDNDQuMzQ1OCA1Mi43NzI0IDQ0LjkxOCA1Mi43NzI0IDQ1LjA0OCA1Mi43OTg0QzQ1LjEgNTIuNzk4NCA0NS4xMjYxIDUyLjgyNDQgNDUuMTc4MSA1Mi44NTA0QzQ1LjM2MDEgNTIuOTI4NCA0NS40NjQyIDUzLjA4NDQgNDUuNDY0MiA1My4yNjY1QzQ1LjQ5MDIgNTMuNDc0NiA0NS40MTIxIDUzLjYzMDYgNDUuMjMwMSA1My43NjA2QzQ1LjIwNDEgNTMuNzg2NyA0NS4xNTIxIDUzLjgxMjcgNDUuMSA1My44Mzg3QzQ1LjEyNjEgNTMuODY0NyA0NS4xMjYxIDUzLjkxNjcgNDUuMTUyMSA1My45NDI3QzQ1LjIzMDEgNTQuMDcyNyA0NS4zMDgxIDU0LjIyODggNDUuNDEyMSA1NC4zNTg4QzQ1LjQzODEgNTQuMzg0OCA0NS40MzgxIDU0LjQzNjkgNDUuNDY0MiA1NC40ODg5QzQ1LjMwODEgNTQuNTE0OSA0NS4xNzgxIDU0LjUxNDkgNDUuMDIyIDU0LjQ4ODlDNDQuOTQ0IDU0LjM1ODggNDQuODkyIDU0LjI1NDggNDQuODE0IDU0LjEyNDhDNDQuNzg4IDU0LjA0NjcgNDQuNzM1OSA1My45OTQ3IDQ0LjY4MzkgNTMuOTE2N0M0NC42NTc5IDUzLjg5MDcgNDQuNjMxOSA1My44NjQ3IDQ0LjYwNTkgNTMuODY0N0M0NC41NTM5IDUzLjg2NDcgNDQuNTUzOSA1My45MTY3IDQ0LjU1MzkgNTMuOTQyN0M0NC41NTM5IDU0LjA3MjcgNDQuNTUzOSA1NC4yMjg4IDQ0LjU1MzkgNTQuMzU4OEM0NC41NTM5IDU0LjM4NDggNDQuNTUzOSA1NC40MzY5IDQ0LjU1MzkgNTQuNDg4OUM0NC40MjM4IDU0LjUxNDkgNDQuMjkzOCA1NC41MTQ5IDQ0LjE2MzggNTQuNDg4OUM0NC4xMzc4IDU0LjMzMjggNDQuMTM3OCA1My4zMTg1IDQ0LjEzNzggNTIuOTAyNEM0NC4xMzc4IDUyLjg3NjQgNDQuMTM3OCA1Mi44NTA0IDQ0LjE2MzggNTIuNzk4NFpNNDQuNTUzOSA1My41MjY2QzQ0LjY4MzkgNTMuNTc4NiA0NC44MTQgNTMuNTc4NiA0NC45NDQgNTMuNTI2NkM0NS4wMjIgNTMuNTAwNiA0NS4wNDggNTMuNDIyNSA0NS4wNDggNTMuMzQ0NUM0NS4wNDggNTMuMjY2NSA0NS4wMjIgNTMuMTg4NSA0NC45NDQgNTMuMTYyNUM0NC44MTQgNTMuMTM2NSA0NC43MDk5IDUzLjExMDUgNDQuNTc5OSA1My4xNjI1QzQ0LjU1MzkgNTMuMjkyNSA0NC41NTM5IDUzLjM5NjUgNDQuNTUzOSA1My41MjY2WiIgZmlsbD0iI0ZCQjAzQyIvPgo8cGF0aCBkPSJNNTAuOTc3OCAzMS4yMzc5TDQ3LjQxNDcgMjcuNjc0OFYxNi45NTk2SDYyLjU3NzNMNjAuNzgyOCAyMC41MjI3SDUwLjk1MThWMjUuODgwM0w1Mi43NDY0IDI3LjY3NDhINjEuNjY3VjMxLjIzNzlINTAuOTc3OFpNNzQuMTc2OCAyMC41MjI3VjI3LjMxMDdMNjguODE5MiAyNC4wODU3VjI4LjA5MDlMNzcuNzM5OSAzMy40NDg1VjE2LjkzMzZINjMuNDYxNlYzMS4yMTE5SDY3LjAyNDZWMjAuNDk2Nkw3NC4xNzY4IDIwLjUyMjdaTTc5LjUzNDQgMTQuMjgwOFYzMS4yMzc5SDgzLjA5NzVWMjMuMjAxNUw5My44MTI3IDMzLjkxNjdWMTYuOTU5Nkg5MC4yNDk2VjI0Ljk5Nkw3OS41MzQ0IDE0LjI4MDhaTTk1LjU4MTIgMTYuOTU5NlYyMC41MjI3SDEwMC45MzlWMzIuMTIyMUwxMDQuNTAyIDMwLjMyNzZWMjAuNTIyN0gxMDguOTc1TDExMC43NDQgMTYuOTU5Nkg5NS41ODEyWk0xMjIuMzQzIDIwLjUyMjdWMjcuMzEwN0wxMTYuOTg2IDI0LjA4NTdWMjguMDkwOUwxMjUuOTA2IDMzLjQ0ODVWMTYuOTMzNkgxMTEuNjU0VjMxLjIxMTlIMTE1LjIxN1YyMC40OTY2TDEyMi4zNDMgMjAuNTIyN1pNMTI3LjcwMSAxNi45NTk2VjIwLjUyMjdIMTMzLjA1OVYzMi4xMjIxTDEzNi42MjIgMzAuMzI3NlYyMC41MjI3SDE0MS4wNjlMMTQyLjgzNyAxNi45NTk2SDEyNy43MDFaTTE1NC40MzcgMjAuNTIyN1YyNy4zMTA3TDE0OS4wNzkgMjQuMDg1N1YyOC4wOTA5TDE1OCAzMy40NDg1VjE2LjkzMzZIMTQzLjcyMlYzMS4yMTE5SDE0Ny4yODVWMjAuNDk2NkwxNTQuNDM3IDIwLjUyMjdaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNNTAuNjY1NyAzOS41MzQ0SDUxLjM0MTlWMzkuNTYwNEM1MS4zNDE5IDQwLjA1NDUgNTEuMTg1OSA0MC40NzA3IDUwLjgyMTggNDAuODA4OEM1MC40NTc3IDQxLjE0NjkgNDkuOTg5NSA0MS4zMDI5IDQ5LjM5MTMgNDEuMzAyOUM0OC43OTMyIDQxLjMwMjkgNDguMzI1IDQxLjA5NDggNDcuOTYwOSA0MC42Nzg3QzQ3LjU5NjggNDAuMjYyNiA0Ny4zODg3IDM5LjcxNjQgNDcuMzg4NyAzOS4wNjYyVjM4LjEyOTlDNDcuMzg4NyAzNy40Nzk4IDQ3LjU3MDggMzYuOTMzNiA0Ny45NjA5IDM2LjUxNzVDNDguMzI1IDM2LjEwMTMgNDguODE5MiAzNS44OTMzIDQ5LjQxNzMgMzUuODkzM0M1MC4wMTU1IDM1Ljg5MzMgNTAuNDgzNyAzNi4wNDkzIDUwLjg0NzggMzYuMzYxNEM1MS4yMTE5IDM2LjY3MzUgNTEuMzY3OSAzNy4wODk2IDUxLjM2NzkgMzcuNjA5OFYzNy42MzU4SDUwLjY2NTdDNTAuNjY1NyAzNy4yNzE3IDUwLjU2MTcgMzYuOTU5NiA1MC4zMjc2IDM2Ljc1MTVDNTAuMTE5NiAzNi41NDM1IDQ5LjgwNzUgMzYuNDM5NCA0OS40MTczIDM2LjQzOTRDNDkuMDI3MiAzNi40Mzk0IDQ4LjcxNTEgMzYuNTk1NSA0OC40ODExIDM2LjkwNzZDNDguMjQ3IDM3LjIxOTcgNDguMTE3IDM3LjYwOTggNDguMTE3IDM4LjEwMzlWMzkuMDQwMkM0OC4xMTcgMzkuNTM0NCA0OC4yNDcgMzkuOTI0NSA0OC40ODExIDQwLjIzNjZDNDguNzE1MSA0MC41NDg3IDQ5LjAyNzIgNDAuNzA0NyA0OS40MTczIDQwLjcwNDdDNDkuODA3NSA0MC43MDQ3IDUwLjExOTYgNDAuNjAwNyA1MC4zMjc2IDQwLjM5MjZDNTAuNTYxNyA0MC4yMTA2IDUwLjY2NTcgMzkuODk4NSA1MC42NjU3IDM5LjUzNDRaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNNTIuOTAyNCAzOS4yMjIzVjM5LjMwMDNDNTIuOTAyNCAzOS43NDI0IDUyLjk4MDQgNDAuMDgwNSA1My4xNjI1IDQwLjM0MDZDNTMuMzQ0NSA0MC42MDA3IDUzLjYwNDYgNDAuNzMwNyA1My45NDI3IDQwLjczMDdDNTQuMjgwOCA0MC43MzA3IDU0LjU0MDkgNDAuNjAwNyA1NC43MjMgNDAuMzQwNkM1NC45MDUgNDAuMDgwNSA1NC45ODMgMzkuNzQyNCA1NC45ODMgMzkuMzAwM1YzOS4yMjIzQzU0Ljk4MyAzOC44MDYyIDU0LjkwNSAzOC40NDIgNTQuNzIzIDM4LjE4MkM1NC41NDA5IDM3LjkyMTkgNTQuMjgwOCAzNy43OTE4IDUzLjk0MjcgMzcuNzkxOEM1My42MDQ2IDM3Ljc5MTggNTMuMzQ0NSAzNy45MjE5IDUzLjE4ODUgMzguMTgyQzUyLjk4MDQgMzguNDQyIDUyLjkwMjQgMzguODA2MiA1Mi45MDI0IDM5LjIyMjNaTTUyLjE3NDIgMzkuMzAwM1YzOS4yMjIzQzUyLjE3NDIgMzguNjI0MSA1Mi4zMzAyIDM4LjE1NiA1Mi42NDIzIDM3Ljc5MThDNTIuOTU0NCAzNy40Mjc3IDUzLjM3MDUgMzcuMjQ1NyA1My45MTY3IDM3LjI0NTdDNTQuNDYyOSAzNy4yNDU3IDU0Ljg3OSAzNy40Mjc3IDU1LjE5MTEgMzcuNzkxOEM1NS41MDMyIDM4LjE1NiA1NS42NTkyIDM4LjYyNDEgNTUuNjU5MiAzOS4yMjIzVjM5LjMwMDNDNTUuNjU5MiAzOS44OTg1IDU1LjUwMzIgNDAuMzY2NiA1NS4xOTExIDQwLjczMDdDNTQuODc5IDQxLjA5NDggNTQuNDYyOSA0MS4yNzY5IDUzLjkxNjcgNDEuMjc2OUM1My4zNzA1IDQxLjI3NjkgNTIuOTU0NCA0MS4wOTQ4IDUyLjY0MjMgNDAuNzMwN0M1Mi4zNTYyIDQwLjM2NjYgNTIuMTc0MiAzOS44OTg1IDUyLjE3NDIgMzkuMzAwM1oiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik01Ny40Mjc4IDQxLjE5ODlINTYuNzI1NVYzNy4yOTc3SDU3LjM0OTdMNTcuNDAxNyAzNy44MTc5QzU3LjY2MTggMzcuNDI3NyA1OC4wNTE5IDM3LjIxOTcgNTguNTk4MSAzNy4yMTk3QzU5LjExODMgMzcuMjE5NyA1OS40ODI0IDM3LjQ1MzcgNTkuNjY0NCAzNy45NDc5QzU5LjkyNDUgMzcuNDc5OCA2MC4zNDA2IDM3LjIxOTcgNjAuODYwOCAzNy4yMTk3QzYxLjI3NjkgMzcuMjE5NyA2MS41ODkgMzcuMzQ5NyA2MS44MjMxIDM3LjYzNThDNjIuMDU3MSAzNy45MjE5IDYyLjE2MTIgMzguMzEyIDYyLjE2MTIgMzguODU4MlY0MS4xOTg5SDYxLjQ1OVYzOC44NTgyQzYxLjQ1OSAzOC40OTQxIDYxLjQwNjkgMzguMjA4IDYxLjI3NjkgMzguMDUxOUM2MS4xNDY5IDM3Ljg5NTkgNjAuOTY0OCAzNy43OTE4IDYwLjcwNDcgMzcuNzkxOEM2MC40NDQ3IDM3Ljc5MTggNjAuMjM2NiAzNy44Njk5IDYwLjEwNjYgMzguMDUxOUM1OS45NTA1IDM4LjIwOCA1OS44NzI1IDM4LjQxNiA1OS44NDY1IDM4LjcwMjFWNDEuMTk4OUg1OS4xMTgzVjM4Ljg1ODJDNTkuMTE4MyAzOC40OTQxIDU5LjA0MDIgMzguMjM0IDU4LjkxMDIgMzguMDUxOUM1OC43ODAyIDM3Ljg2OTkgNTguNTcyMSAzNy43OTE4IDU4LjMxMiAzNy43OTE4QzU3Ljg5NTkgMzcuNzkxOCA1Ny42MDk4IDM3Ljk3MzkgNTcuNDUzOCAzOC4zMTJWNDEuMTk4OUg1Ny40Mjc4WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTY0LjA1OTggNDEuMTk4OUg2My4zNTc1VjM3LjI5NzdINjMuOTgxN0w2NC4wMzM3IDM3LjgxNzlDNjQuMjkzOCAzNy40Mjc3IDY0LjY4MzkgMzcuMjE5NyA2NS4yMzAxIDM3LjIxOTdDNjUuNzUwMyAzNy4yMTk3IDY2LjExNDQgMzcuNDUzNyA2Ni4yOTY0IDM3Ljk0NzlDNjYuNTU2NSAzNy40Nzk4IDY2Ljk3MjYgMzcuMjE5NyA2Ny40OTI4IDM3LjIxOTdDNjcuOTA4OSAzNy4yMTk3IDY4LjIyMSAzNy4zNDk3IDY4LjQ1NTEgMzcuNjM1OEM2OC42ODkxIDM3LjkyMTkgNjguNzkzMiAzOC4zMTIgNjguNzkzMiAzOC44NTgyVjQxLjE5ODlINjguMDkxVjM4Ljg1ODJDNjguMDkxIDM4LjQ5NDEgNjguMDM5IDM4LjIwOCA2Ny45MDg5IDM4LjA1MTlDNjcuNzc4OSAzNy44OTU5IDY3LjU5NjggMzcuNzkxOCA2Ny4zMzY3IDM3Ljc5MThDNjcuMDc2NyAzNy43OTE4IDY2Ljg2ODYgMzcuODY5OSA2Ni43Mzg2IDM4LjA1MTlDNjYuNTgyNSAzOC4yMDggNjYuNTA0NSAzOC40MTYgNjYuNDc4NSAzOC43MDIxVjQxLjE5ODlINjUuNzUwM1YzOC44NTgyQzY1Ljc1MDMgMzguNDk0MSA2NS42NzIyIDM4LjIzNCA2NS41NDIyIDM4LjA1MTlDNjUuNDEyMiAzNy44Njk5IDY1LjIwNDEgMzcuNzkxOCA2NC45NDQgMzcuNzkxOEM2NC41Mjc5IDM3Ljc5MTggNjQuMjQxOCAzNy45NzM5IDY0LjA4NTggMzguMzEyVjQxLjE5ODlINjQuMDU5OFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik03MS4zMTU5IDQxLjI3NjlDNzAuODczOCA0MS4yNzY5IDcwLjUzNTcgNDEuMTQ2OSA3MC4zMDE2IDQwLjg2MDhDNzAuMDY3NiA0MC41NzQ3IDY5Ljk2MzUgNDAuMTU4NiA2OS45NjM1IDM5LjU4NjRWMzcuMjk3N0g3MC42NjU3VjM5LjYxMjRDNzAuNjY1NyA0MC4wMjg1IDcwLjcxNzggNDAuMzE0NiA3MC44NDc4IDQwLjQ3MDdDNzAuOTc3OCA0MC42MjY3IDcxLjE1OTkgNDAuNzA0NyA3MS40MiA0MC43MDQ3QzcxLjkxNDEgNDAuNzA0NyA3Mi4yNTIyIDQwLjQ5NjcgNzIuNDM0MyA0MC4xMDY1VjM3LjI5NzdINzMuMTM2NVY0MS4xOTg5SDcyLjUxMjNMNzIuNDYwMyA0MC42MjY3QzcyLjIwMDIgNDEuMDY4OCA3MS44MTAxIDQxLjI3NjkgNzEuMzE1OSA0MS4yNzY5WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTc0LjMzMjggMzcuMjk3N0g3NC45NTdMNzUuMDA5IDM3Ljg2OTlDNzUuMjY5MSAzNy40Mjc3IDc1LjY1OTIgMzcuMjE5NyA3Ni4xNzk0IDM3LjIxOTdDNzYuNTk1NSAzNy4yMTk3IDc2LjkzMzYgMzcuMzQ5NyA3Ny4xNjc3IDM3LjU4MzhDNzcuNDAxOCAzNy44NDM5IDc3LjUwNTggMzguMjA4IDc3LjUwNTggMzguNzI4MVY0MS4xOTg5SDc2LjgwMzZWMzguNzU0MUM3Ni44MDM2IDM4LjQxNiA3Ni43MjU2IDM4LjE4MiA3Ni41OTU1IDM4LjAyNTlDNzYuNDY1NSAzNy44Njk5IDc2LjI1NzQgMzcuODE3OSA3NS45NzEzIDM3LjgxNzlDNzUuNzYzMyAzNy44MTc5IDc1LjU4MTIgMzcuODY5OSA3NS40MjUyIDM3Ljk3MzlDNzUuMjY5MSAzOC4wNzc5IDc1LjEzOTEgMzguMjA4IDc1LjAzNTEgMzguMzlWNDEuMjI0OUg3NC4zMzI4VjM3LjI5NzdaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNNzkuNDgyNCAzNy4yOTc3VjQxLjE5ODlINzguNzU0MlYzNy4yOTc3SDc5LjQ4MjRaTTc5LjQ4MjQgMzUuNTgxMlYzNi4zMDk0SDc4Ljc1NDJWMzUuNTgxMkg3OS40ODI0WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTgxLjI3NjkgMzkuMzI2M0M4MS4yNzY5IDM5Ljc0MjQgODEuMzU0OSA0MC4wODA1IDgxLjUxMSA0MC4zMTQ2QzgxLjY2NyA0MC41NzQ3IDgxLjk1MzEgNDAuNzA0NyA4Mi4zMTcyIDQwLjcwNDdDODIuNTUxMyA0MC43MDQ3IDgyLjc1OTQgNDAuNjI2NyA4Mi45NDE0IDQwLjQ5NjdDODMuMTIzNSA0MC4zNDA2IDgzLjIwMTUgNDAuMTg0NiA4My4yMDE1IDM5Ljk1MDVIODMuODUxN1YzOS45NzY1QzgzLjg3NzcgNDAuMzE0NiA4My43MjE3IDQwLjYyNjcgODMuNDA5NiA0MC44ODY4QzgzLjA5NzUgNDEuMTQ2OSA4Mi43MzM0IDQxLjI3NjkgODIuMzE3MiA0MS4yNzY5QzgxLjc3MTEgNDEuMjc2OSA4MS4zMjg5IDQxLjA5NDggODEuMDE2OSA0MC43MzA3QzgwLjcwNDggNDAuMzY2NiA4MC41NDg3IDM5Ljg5ODUgODAuNTQ4NyAzOS4zMjYzVjM5LjE3MDNDODAuNTQ4NyAzOC41OTgxIDgwLjcwNDggMzguMTI5OSA4MS4wMTY5IDM3Ljc2NThDODEuMzI4OSAzNy40MDE3IDgxLjc3MTEgMzcuMjE5NyA4Mi4zMTcyIDM3LjIxOTdDODIuNzU5NCAzNy4yMTk3IDgzLjE0OTUgMzcuMzQ5NyA4My40MzU2IDM3LjYwOThDODMuNzIxNyAzNy44Njk5IDgzLjg3NzcgMzguMjA4IDgzLjg1MTcgMzguNTk4MVYzOC42MjQxSDgzLjIwMTVDODMuMjAxNSAzOC4zOSA4My4xMjM1IDM4LjE4MiA4Mi45NDE0IDM4LjAyNTlDODIuNzg1NCAzNy44Njk5IDgyLjU1MTMgMzcuNzY1OCA4Mi4zMTcyIDM3Ljc2NThDODIuMDU3MiAzNy43NjU4IDgxLjg3NTEgMzcuODE3OSA4MS42OTMgMzcuOTQ3OUM4MS41MzcgMzguMDc3OSA4MS40MzMgMzguMjM0IDgxLjM1NDkgMzguNDQyQzgxLjMwMjkgMzguNjUwMSA4MS4yNTA5IDM4Ljg4NDIgODEuMjUwOSAzOS4xNDQzVjM5LjMyNjNIODEuMjc2OVoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik04NS45MzIzIDQxLjI3NjlDODUuNTE2MiA0MS4yNzY5IDg1LjIwNDEgNDEuMTcyOSA4NC45OTYgNDAuOTY0OEM4NC43ODggNDAuNzU2NyA4NC42ODM5IDQwLjQ3MDcgODQuNjgzOSA0MC4xMDY1Qzg0LjY4MzkgMzkuNzQyNCA4NC44NCAzOS40NTYzIDg1LjEyNjEgMzkuMjIyM0M4NS40MzgyIDM5LjAxNDIgODUuODI4MyAzOC45MTAyIDg2LjM0ODUgMzguOTEwMkg4Ny4xMjg3VjM4LjUyMDFDODcuMTI4NyAzOC4yODYgODcuMDUwNyAzOC4xMDM5IDg2LjkyMDYgMzcuOTczOUM4Ni43OTA2IDM3Ljg0MzkgODYuNTgyNSAzNy43NjU4IDg2LjM0ODUgMzcuNzY1OEM4Ni4xMTQ0IDM3Ljc2NTggODUuOTMyMyAzNy44MTc5IDg1Ljc3NjMgMzcuOTQ3OUM4NS42MjAyIDM4LjA1MTkgODUuNTY4MiAzOC4yMDggODUuNTY4MiAzOC4zNjRIODQuODkyVjM4LjMzOEM4NC44NjYgMzguMDUxOSA4NS4wMjIxIDM3Ljc5MTggODUuMzA4MSAzNy41NTc4Qzg1LjU5NDIgMzcuMzIzNyA4NS45NTgzIDM3LjIxOTcgODYuNDAwNSAzNy4yMTk3Qzg2Ljg0MjYgMzcuMjE5NyA4Ny4yMDY3IDM3LjMyMzcgODcuNDY2OCAzNy41NTc4Qzg3LjcyNjkgMzcuNzkxOCA4Ny44NTY5IDM4LjEwMzkgODcuODU2OSAzOC41MjAxVjQwLjM5MjZDODcuODU2OSA0MC43MDQ3IDg3Ljg4MjkgNDAuOTY0OCA4Ny45NjA5IDQxLjE3MjlIODcuMjMyN0M4Ny4xODA3IDQwLjkxMjggODcuMTU0NyA0MC43MzA3IDg3LjE1NDcgNDAuNTc0N0M4Ny4wMjQ2IDQwLjc4MjggODYuODQyNiA0MC45Mzg4IDg2LjYzNDUgNDEuMDQyOEM4Ni40MDA1IDQxLjIyNDkgODYuMTY2NCA0MS4yNzY5IDg1LjkzMjMgNDEuMjc2OVpNODUuMzg2MiA0MC4xMzI2Qzg1LjM4NjIgNDAuMzE0NiA4NS40MzgyIDQwLjQ0NDYgODUuNTQyMiA0MC41NDg3Qzg1LjY0NjIgNDAuNjUyNyA4NS44MjgzIDQwLjcwNDcgODYuMDYyNCA0MC43MDQ3Qzg2LjI5NjQgNDAuNzA0NyA4Ni41MDQ1IDQwLjY1MjcgODYuNzEyNiA0MC41MjI3Qzg2LjkyMDYgNDAuMzkyNiA4Ny4wNTA3IDQwLjIzNjYgODcuMTI4NyA0MC4wNTQ1VjM5LjQwNDNIODYuMzIyNEM4Ni4wMzYzIDM5LjQwNDMgODUuODAyMyAzOS40ODI0IDg1LjY0NjIgMzkuNjEyNEM4NS40OTAyIDM5Ljc0MjQgODUuMzg2MiAzOS45MjQ1IDg1LjM4NjIgNDAuMTMyNloiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik04OS4yNjEzIDM2LjM2MTRIODkuOTg5NlYzNy4yOTc3SDkwLjcxNzhWMzcuODE3OUg4OS45ODk2VjQwLjE4NDZDODkuOTg5NiA0MC41MjI3IDkwLjExOTYgNDAuNjc4NyA5MC40MDU3IDQwLjY3ODdDOTAuNDgzNyA0MC42Nzg3IDkwLjU4NzcgNDAuNjUyNyA5MC42NjU4IDQwLjYyNjdMOTAuNzY5OCA0MS4xMjA4QzkwLjYzOTggNDEuMjI0OSA5MC40NTc3IDQxLjI3NjkgOTAuMjIzNiA0MS4yNzY5Qzg5LjkxMTUgNDEuMjc2OSA4OS43MDM1IDQxLjE5ODkgODkuNTIxNCA0MS4wMTY4Qzg5LjM2NTQgNDAuODM0OCA4OS4yNjEzIDQwLjU3NDcgODkuMjYxMyA0MC4yMTA2VjM3Ljg0MzlIODguNjM3MVYzNy4zMjM3SDg5LjI2MTNWMzYuMzYxNFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik05Mi41MzgzIDM3LjI5NzdWNDEuMTk4OUg5MS44MzYxVjM3LjI5NzdIOTIuNTM4M1pNOTIuNTM4MyAzNS41ODEyVjM2LjMwOTRIOTEuODM2MVYzNS41ODEySDkyLjUzODNaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNOTQuMzMyOSAzOS4yMjIzVjM5LjMwMDNDOTQuMzMyOSAzOS43NDI0IDk0LjQxMDkgNDAuMDgwNSA5NC41OTI5IDQwLjM0MDZDOTQuNzc1IDQwLjYwMDcgOTUuMDM1MSA0MC43MzA3IDk1LjM3MzIgNDAuNzMwN0M5NS43MTEzIDQwLjczMDcgOTUuOTcxNCA0MC42MDA3IDk2LjE1MzQgNDAuMzQwNkM5Ni4zMzU1IDQwLjA4MDUgOTYuNDEzNSAzOS43NDI0IDk2LjQxMzUgMzkuMzAwM1YzOS4yMjIzQzk2LjQxMzUgMzguODA2MiA5Ni4zMzU1IDM4LjQ0MiA5Ni4xNTM0IDM4LjE4MkM5NS45NzE0IDM3LjkyMTkgOTUuNzExMyAzNy43OTE4IDk1LjM3MzIgMzcuNzkxOEM5NS4wMzUxIDM3Ljc5MTggOTQuNzc1IDM3LjkyMTkgOTQuNjE4OSAzOC4xODJDOTQuNDM2OSAzOC40NDIgOTQuMzMyOSAzOC44MDYyIDk0LjMzMjkgMzkuMjIyM1pNOTMuNjMwNiAzOS4zMDAzVjM5LjIyMjNDOTMuNjMwNiAzOC42MjQxIDkzLjc4NjcgMzguMTU2IDk0LjA5ODggMzcuNzkxOEM5NC40MTA5IDM3LjQyNzcgOTQuODI3IDM3LjI0NTcgOTUuMzczMiAzNy4yNDU3Qzk1LjkxOTMgMzcuMjQ1NyA5Ni4zMzU1IDM3LjQyNzcgOTYuNjQ3NSAzNy43OTE4Qzk2Ljk1OTYgMzguMTU2IDk3LjExNTcgMzguNjI0MSA5Ny4xMTU3IDM5LjIyMjNWMzkuMzAwM0M5Ny4xMTU3IDM5Ljg5ODUgOTYuOTU5NiA0MC4zNjY2IDk2LjY0NzUgNDAuNzMwN0M5Ni4zMzU1IDQxLjA5NDggOTUuOTE5MyA0MS4yNzY5IDk1LjM3MzIgNDEuMjc2OUM5NC44MjcgNDEuMjc2OSA5NC40MTA5IDQxLjA5NDggOTQuMDk4OCA0MC43MzA3QzkzLjc4NjcgNDAuMzY2NiA5My42MzA2IDM5Ljg5ODUgOTMuNjMwNiAzOS4zMDAzWiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTk4LjE1NiAzNy4yOTc3SDk4Ljc4MDJMOTguODMyMiAzNy44Njk5Qzk5LjA5MjMgMzcuNDI3NyA5OS40ODI0IDM3LjIxOTcgMTAwLjAwMyAzNy4yMTk3QzEwMC40MTkgMzcuMjE5NyAxMDAuNzU3IDM3LjM0OTcgMTAwLjk5MSAzNy41ODM4QzEwMS4yMjUgMzcuODQzOSAxMDEuMzI5IDM4LjIwOCAxMDEuMzI5IDM4LjcyODFWNDEuMTk4OUgxMDAuNjI3VjM4Ljc1NDFDMTAwLjYyNyAzOC40MTYgMTAwLjU0OSAzOC4xODIgMTAwLjQxOSAzOC4wMjU5QzEwMC4yODkgMzcuODY5OSAxMDAuMDgxIDM3LjgxNzkgOTkuNzk0NSAzNy44MTc5Qzk5LjU4NjQgMzcuODE3OSA5OS40MDQ0IDM3Ljg2OTkgOTkuMjQ4MyAzNy45NzM5Qzk5LjA5MjMgMzguMDc3OSA5OC45NjIyIDM4LjIwOCA5OC44NTgyIDM4LjM5VjQxLjIyNDlIOTguMTU2VjM3LjI5NzdaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTA1LjMwOCAzOS42OTA0QzEwNS4zMDggNDAuMDI4NSAxMDUuNDM4IDQwLjI2MjYgMTA1LjY3MiA0MC40NDQ2QzEwNS45MDYgNDAuNjI2NyAxMDYuMjE4IDQwLjcwNDcgMTA2LjU4MyA0MC43MDQ3QzEwNi45NDcgNDAuNzA0NyAxMDcuMjMzIDQwLjYyNjcgMTA3LjQ0MSA0MC40NzA3QzEwNy42NDkgNDAuMzE0NiAxMDcuNzUzIDQwLjEwNjUgMTA3Ljc1MyAzOS44NzI1QzEwNy43NTMgMzkuNjEyNCAxMDcuNjQ5IDM5LjQwNDMgMTA3LjQ2NyAzOS4yNDgzQzEwNy4yODUgMzkuMDkyMiAxMDYuOTczIDM4Ljk2MjIgMTA2LjUwNSAzOC44NTgyQzEwNS4zMzQgMzguNTcyMSAxMDQuNzM2IDM4LjA1MTkgMTA0LjczNiAzNy4yOTc3QzEwNC43MzYgMzYuODgxNiAxMDQuODkyIDM2LjU0MzUgMTA1LjIzIDM2LjI4MzRDMTA1LjU2OCAzNi4wMjMzIDEwNi4wMSAzNS44NjczIDEwNi41NTcgMzUuODY3M0MxMDcuMTAzIDM1Ljg2NzMgMTA3LjU0NSAzNi4wMjMzIDEwNy45MDkgMzYuMzM1NEMxMDguMjQ3IDM2LjY0NzUgMTA4LjQyOSAzNy4wMTE2IDEwOC40MDMgMzcuNDUzOFYzNy40Nzk4SDEwNy43MjdDMTA3LjcyNyAzNy4xNjc3IDEwNy42MjMgMzYuOTA3NiAxMDcuNDE1IDM2LjcyNTVDMTA3LjIwNyAzNi41NDM1IDEwNi45MjEgMzYuNDM5NCAxMDYuNTU3IDM2LjQzOTRDMTA2LjE5MiAzNi40Mzk0IDEwNS45MDYgMzYuNTE3NSAxMDUuNzI0IDM2LjY3MzVDMTA1LjU0MiAzNi44Mjk2IDEwNS40MzggMzcuMDM3NiAxMDUuNDM4IDM3LjI3MTdDMTA1LjQzOCAzNy41MDU4IDEwNS41NDIgMzcuNzEzOCAxMDUuNzUgMzcuODY5OUMxMDUuOTU4IDM4LjAyNTkgMTA2LjI5NiAzOC4xNTYgMTA2LjczOSAzOC4yNkMxMDcuODU3IDM4LjU0NjEgMTA4LjQyOSAzOS4wNjYyIDEwOC40MjkgMzkuODcyNUMxMDguNDI5IDQwLjI4ODYgMTA4LjI0NyA0MC42MjY3IDEwNy45MDkgNDAuODg2OEMxMDcuNTcxIDQxLjE0NjkgMTA3LjEwMyA0MS4yNzY5IDEwNi41NTcgNDEuMjc2OUMxMDYuMTkyIDQxLjI3NjkgMTA1Ljg4IDQxLjIyNDkgMTA1LjU2OCA0MS4wOTQ4QzEwNS4yNTYgNDAuOTY0OCAxMDUuMDIyIDQwLjc4MjcgMTA0Ljg0IDQwLjU0ODdDMTA0LjY1OCA0MC4zMTQ2IDEwNC41OCA0MC4wMjg1IDEwNC41OCAzOS43MTY0VjM5LjY5MDRIMTA1LjMwOFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik0xMTAuMDk0IDM5LjIyMjNWMzkuMzAwM0MxMTAuMDk0IDM5Ljc0MjQgMTEwLjE3MiA0MC4wODA1IDExMC4zNTQgNDAuMzQwNkMxMTAuNTM2IDQwLjYwMDcgMTEwLjc5NiA0MC43MzA3IDExMS4xMzQgNDAuNzMwN0MxMTEuNDcyIDQwLjczMDcgMTExLjczMiA0MC42MDA3IDExMS45MTQgNDAuMzQwNkMxMTIuMDk2IDQwLjA4MDUgMTEyLjE3NCAzOS43NDI0IDExMi4xNzQgMzkuMzAwM1YzOS4yMjIzQzExMi4xNzQgMzguODA2MiAxMTIuMDk2IDM4LjQ0MiAxMTEuOTE0IDM4LjE4MkMxMTEuNzMyIDM3LjkyMTkgMTExLjQ3MiAzNy43OTE4IDExMS4xMzQgMzcuNzkxOEMxMTAuNzk2IDM3Ljc5MTggMTEwLjUzNiAzNy45MjE5IDExMC4zOCAzOC4xODJDMTEwLjE3MiAzOC40NDIgMTEwLjA5NCAzOC44MDYyIDExMC4wOTQgMzkuMjIyM1pNMTA5LjM2NSAzOS4zMDAzVjM5LjIyMjNDMTA5LjM2NSAzOC42MjQxIDEwOS41MjEgMzguMTU2IDEwOS44MzQgMzcuNzkxOEMxMTAuMTQ2IDM3LjQyNzcgMTEwLjU2MiAzNy4yNDU3IDExMS4xMDggMzcuMjQ1N0MxMTEuNjU0IDM3LjI0NTcgMTEyLjA3IDM3LjQyNzcgMTEyLjM4MiAzNy43OTE4QzExMi42OTQgMzguMTU2IDExMi44NSAzOC42MjQxIDExMi44NSAzOS4yMjIzVjM5LjMwMDNDMTEyLjg1IDM5Ljg5ODUgMTEyLjY5NCA0MC4zNjY2IDExMi4zODIgNDAuNzMwN0MxMTIuMDcgNDEuMDk0OCAxMTEuNjU0IDQxLjI3NjkgMTExLjEwOCA0MS4yNzY5QzExMC41NjIgNDEuMjc2OSAxMTAuMTQ2IDQxLjA5NDggMTA5LjgzNCA0MC43MzA3QzEwOS41NDcgNDAuMzY2NiAxMDkuMzY1IDM5Ljg5ODUgMTA5LjM2NSAzOS4zMDAzWiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTExNC42NzEgMzUuNTgxMlY0MS4xOTg5SDExMy45NjlWMzUuNTgxMkgxMTQuNjcxWiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTExNy4yNzIgNDEuMjc2OUMxMTYuODMgNDEuMjc2OSAxMTYuNDkyIDQxLjE0NjkgMTE2LjI1NyA0MC44NjA4QzExNi4wMjMgNDAuNTc0NyAxMTUuOTE5IDQwLjE1ODYgMTE1LjkxOSAzOS41ODY0VjM3LjI5NzdIMTE2LjYyMlYzOS42MTI0QzExNi42MjIgNDAuMDI4NSAxMTYuNjc0IDQwLjMxNDYgMTE2LjgwNCA0MC40NzA3QzExNi45MzQgNDAuNjI2NyAxMTcuMTE2IDQwLjcwNDcgMTE3LjM3NiA0MC43MDQ3QzExNy44NyA0MC43MDQ3IDExOC4yMDggNDAuNDk2NyAxMTguMzkgNDAuMTA2NVYzNy4yOTc3SDExOS4wOTJWNDEuMTk4OUgxMTguNDQyTDExOC4zOSA0MC42MjY3QzExOC4xNTYgNDEuMDY4OCAxMTcuNzY2IDQxLjI3NjkgMTE3LjI3MiA0MS4yNzY5WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTEyMC41MjMgMzYuMzYxNEgxMjEuMjUxVjM3LjI5NzdIMTIxLjk3OVYzNy44MTc5SDEyMS4yNTFWNDAuMTg0NkMxMjEuMjUxIDQwLjUyMjcgMTIxLjM4MSA0MC42Nzg3IDEyMS42NjcgNDAuNjc4N0MxMjEuNzQ1IDQwLjY3ODcgMTIxLjg0OSA0MC42NTI3IDEyMS45MjcgNDAuNjI2N0wxMjIuMDMxIDQxLjEyMDhDMTIxLjkwMSA0MS4yMjQ5IDEyMS43MTkgNDEuMjc2OSAxMjEuNDg1IDQxLjI3NjlDMTIxLjE5OSA0MS4yNzY5IDEyMC45NjUgNDEuMTk4OSAxMjAuNzgzIDQxLjAxNjhDMTIwLjYyNyA0MC44MzQ4IDEyMC41MjMgNDAuNTc0NyAxMjAuNTIzIDQwLjIxMDZWMzcuODQzOUgxMTkuODk5VjM3LjMyMzdIMTIwLjUyM1YzNi4zNjE0WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTEyMy44IDM3LjI5NzdWNDEuMTk4OUgxMjMuMDk4VjM3LjI5NzdIMTIzLjhaTTEyMy44IDM1LjU4MTJWMzYuMzA5NEgxMjMuMDk4VjM1LjU4MTJIMTIzLjhaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTI1LjU5NCAzOS4yMjIzVjM5LjMwMDNDMTI1LjU5NCAzOS43NDI0IDEyNS42NzIgNDAuMDgwNSAxMjUuODU0IDQwLjM0MDZDMTI2LjAzNiA0MC42MDA3IDEyNi4yOTYgNDAuNzMwNyAxMjYuNjM1IDQwLjczMDdDMTI2Ljk3MyA0MC43MzA3IDEyNy4yMzMgNDAuNjAwNyAxMjcuNDE1IDQwLjM0MDZDMTI3LjU5NyA0MC4wODA1IDEyNy42NzUgMzkuNzQyNCAxMjcuNjc1IDM5LjMwMDNWMzkuMjIyM0MxMjcuNjc1IDM4LjgwNjIgMTI3LjU3MSAzOC40NDIgMTI3LjQxNSAzOC4xODJDMTI3LjIzMyAzNy45MjE5IDEyNi45NzMgMzcuNzkxOCAxMjYuNjM1IDM3Ljc5MThDMTI2LjI5NiAzNy43OTE4IDEyNi4wMzYgMzcuOTIxOSAxMjUuODggMzguMTgyQzEyNS42NzIgMzguNDQyIDEyNS41OTQgMzguODA2MiAxMjUuNTk0IDM5LjIyMjNaTTEyNC44OTIgMzkuMzAwM1YzOS4yMjIzQzEyNC44OTIgMzguNjI0MSAxMjUuMDQ4IDM4LjE1NiAxMjUuMzYgMzcuNzkxOEMxMjUuNjcyIDM3LjQyNzcgMTI2LjA4OCAzNy4yNDU3IDEyNi42MzUgMzcuMjQ1N0MxMjcuMTgxIDM3LjI0NTcgMTI3LjU5NyAzNy40Mjc3IDEyNy45MDkgMzcuNzkxOEMxMjguMjIxIDM4LjE1NiAxMjguMzc3IDM4LjYyNDEgMTI4LjM3NyAzOS4yMjIzVjM5LjMwMDNDMTI4LjM3NyAzOS44OTg1IDEyOC4yMjEgNDAuMzY2NiAxMjcuOTA5IDQwLjczMDdDMTI3LjU5NyA0MS4wOTQ4IDEyNy4xODEgNDEuMjc2OSAxMjYuNjM1IDQxLjI3NjlDMTI2LjA4OCA0MS4yNzY5IDEyNS42NzIgNDEuMDk0OCAxMjUuMzYgNDAuNzMwN0MxMjUuMDQ4IDQwLjM2NjYgMTI0Ljg5MiAzOS44OTg1IDEyNC44OTIgMzkuMzAwM1oiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik0xMjkuNDE3IDM3LjI5NzdIMTMwLjA0MkwxMzAuMDk0IDM3Ljg2OTlDMTMwLjM1NCAzNy40Mjc3IDEzMC43NDQgMzcuMjE5NyAxMzEuMjY0IDM3LjIxOTdDMTMxLjY4IDM3LjIxOTcgMTMyLjAxOCAzNy4zNDk3IDEzMi4yNTIgMzcuNTgzOEMxMzIuNDg2IDM3Ljg0MzkgMTMyLjU5IDM4LjIwOCAxMzIuNTkgMzguNzI4MVY0MS4xOTg5SDEzMS44ODhWMzguNzU0MUMxMzEuODg4IDM4LjQxNiAxMzEuODEgMzguMTgyIDEzMS42OCAzOC4wMjU5QzEzMS41NSAzNy44Njk5IDEzMS4zNDIgMzcuODE3OSAxMzEuMDU2IDM3LjgxNzlDMTMwLjg0OCAzNy44MTc5IDEzMC42NjYgMzcuODY5OSAxMzAuNTEgMzcuOTczOUMxMzAuMzU0IDM4LjA3NzkgMTMwLjIyNCAzOC4yMDggMTMwLjEyIDM4LjM5VjQxLjIyNDlIMTI5LjQxN1YzNy4yOTc3WiIgZmlsbD0id2hpdGUiLz4KPHBhdGggZD0iTTEzNS4yNDMgNDAuNzMwN0MxMzUuNTAzIDQwLjczMDcgMTM1LjY4NSA0MC42Nzg3IDEzNS44NDEgNDAuNTc0N0MxMzUuOTk3IDQwLjQ3MDcgMTM2LjA0OSA0MC4zNDA2IDEzNi4wNDkgNDAuMTg0NkMxMzYuMDQ5IDQwLjAyODUgMTM1Ljk5NyAzOS44OTg1IDEzNS44NjcgMzkuNzk0NUMxMzUuNzM3IDM5LjY5MDQgMTM1LjUyOSAzOS42MTI0IDEzNS4xOTEgMzkuNTM0NEMxMzQuNjk3IDM5LjQzMDMgMTM0LjMzMyAzOS4yNzQzIDEzNC4wOTkgMzkuMTE4MkMxMzMuODY1IDM4LjkzNjIgMTMzLjc2MSAzOC43MDIxIDEzMy43NjEgMzguMzlDMTMzLjc2MSAzOC4wNzc5IDEzMy44OTEgMzcuODE3OSAxMzQuMTc3IDM3LjU4MzhDMTM0LjQzNyAzNy4zNDk3IDEzNC44MDEgMzcuMjQ1NyAxMzUuMjQzIDM3LjI0NTdDMTM1LjY4NSAzNy4yNDU3IDEzNi4wMjMgMzcuMzQ5NyAxMzYuMzA5IDM3LjU4MzhDMTM2LjU3IDM3LjgxNzkgMTM2LjcgMzguMTAzOSAxMzYuNyAzOC40NDJWMzguNDY4MUgxMzYuMDIzQzEzNi4wMjMgMzguMjg2IDEzNS45NDUgMzguMTI5OSAxMzUuODE1IDM3Ljk5OTlDMTM1LjY1OSAzNy44Njk5IDEzNS40NzcgMzcuNzkxOCAxMzUuMjQzIDM3Ljc5MThDMTM1LjAwOSAzNy43OTE4IDEzNC44MjcgMzcuODQzOSAxMzQuNjk3IDM3Ljk0NzlDMTM0LjU2NyAzOC4wNTE5IDEzNC41MTUgMzguMTgyIDEzNC41MTUgMzguMzM4QzEzNC41MTUgMzguNDk0MSAxMzQuNTY3IDM4LjYyNDEgMTM0LjY3MSAzOC43MDIxQzEzNC43NzUgMzguNzgwMSAxMzUuMDA5IDM4Ljg1ODIgMTM1LjMyMSAzOC45MzYyQzEzNS44MTUgMzkuMDQwMiAxMzYuMTc5IDM5LjE5NjMgMTM2LjQ0IDM5LjM3ODNDMTM2LjY3NCAzOS41NjA0IDEzNi44MDQgMzkuNzk0NCAxMzYuODA0IDQwLjEwNjVDMTM2LjgwNCA0MC40NDQ2IDEzNi42NzQgNDAuNzMwNyAxMzYuMzg3IDQwLjkzODhDMTM2LjEwMSA0MS4xNDY5IDEzNS43MzcgNDEuMjUwOSAxMzUuMjY5IDQxLjI1MDlDMTM0LjgwMSA0MS4yNTA5IDEzNC40MTEgNDEuMTIwOCAxMzQuMTI1IDQwLjg4NjhDMTMzLjgzOSA0MC42NTI3IDEzMy43MDkgNDAuMzQwNiAxMzMuNzA5IDQwLjAwMjVWMzkuOTc2NUgxMzQuMzg1QzEzNC40MTEgNDAuMjEwNiAxMzQuNDg5IDQwLjM5MjYgMTM0LjY0NSA0MC41MjI3QzEzNC43NzUgNDAuNjc4NyAxMzQuOTgzIDQwLjczMDcgMTM1LjI0MyA0MC43MzA3WiIgZmlsbD0id2hpdGUiLz4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8xMDFfNjUiIHgxPSIwLjAwOTg0NDgyIiB5MT0iMjcuNzc4OCIgeDI9IjQ2LjY2NTgiIHkyPSIyNy43Nzg4IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CjxzdG9wIHN0b3AtY29sb3I9IiNGNUIwMUIiLz4KPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjRjJBMDFGIi8+CjwvbGluZWFyR3JhZGllbnQ+CjwvZGVmcz4KPC9zdmc+Cg==',
+                            'width' => '250px', // passt die Breite der Grafik an
+                        ],
+                        [
+                            'type' => 'Image',
+                            'name' => 'CantataText',
+                            'image' => 'data:image/svg+xml;base64, PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NDQo8IS0tIEdlbmVyYXRvcjogQWRvYmUgSWxsdXN0cmF0b3IgMjYuMC4yLCBTVkcgRXhwb3J0IFBsdWctSW4gLiBTVkcgVmVyc2lvbjogNi4wMCBCdWlsZCAwKSAgLS0+DQ0KPHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCINDQoJIHZpZXdCb3g9IjAgMCAyMTcuMSA0MC44IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAyMTcuMSA0MC44OyIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+DQ0KPGc+DQ0KCTxwb2x5Z29uIHBvaW50cz0iMzEuOSw2LjkgMjksMTIuOSAxMCwxMi45IDEwLDI0LjcgMTIuMiwyNy44IDMxLDI3LjggMzEsMzMuOCAxMCwzMy43IDQsMjYuNCA0LDYuOSAJIi8+DQ0KCTxwb2x5Z29uIHBvaW50cz0iMzUsMzMuOCAzNSw2LjkgNjAuOSw2LjkgNjAuOSwzNi44IDQ0LjksMjcuNyA0NC45LDIwLjggNTUuMSwyNy4xIDU1LjEsMTIuNyA0MSwxMi43IDQxLDMzLjggCSIvPg0NCgk8cG9seWdvbiBwb2ludHM9IjY0LjksMzMuNyA2NC45LDIgODUuMSwyMS45IDg1LjEsNi45IDkxLjcsNi45IDkxLjcsMzguOCA3MiwxOC45IDcyLDMzLjcgCSIvPg0NCgk8cG9seWdvbiBwb2ludHM9Ijk2LDYuOCA5NiwxMy45IDEwNS45LDEzLjkgMTA1LjksMzUgMTEzLDMxLjYgMTEzLDEzLjggMTIwLjksMTMuOCAxMjQuMiw2LjggCSIvPg0NCgk8cG9seWdvbiBwb2ludHM9IjEyNS45LDMzLjcgMTI1LjksNi44IDE1NC4xLDYuOCAxNTMuOCwzNy43IDEzNS45LDI3LjYgMTM1LjksMjAuOCAxNDcuMSwyNyAxNDcsMTIuOSAxMzIuOSwxMi44IDEzMi45LDMzLjcgCSIvPg0NCgk8cG9seWdvbiBwb2ludHM9IjE1Nyw2LjQgMTU3LDEzLjUgMTY3LDEzLjUgMTY3LDM0LjYgMTc0LDMxLjIgMTc0LDEzLjQgMTgxLjksMTMuNCAxODUuMiw2LjQgCSIvPg0NCgk8cG9seWdvbiBwb2ludHM9IjE4Ni45LDMzLjMgMTg2LjksNi40IDIxNS4xLDYuNCAyMTQuOCwzNy4zIDE5NywyNy4yIDE5NywyMC40IDIwOC4xLDI2LjYgMjA4LDEyLjUgMTkzLjksMTIuNCAxOTMuOSwzMy4zIAkiLz4NDQo8L2c+DQ0KPC9zdmc+DQ0K',
+                            'width' => '250px', // passt die Breite der Grafik an
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'Label',
+                    'name' => 'Support',
+                    'italic' => true,
+                    'caption' => 'The IR codes learned on the IR Hub can be viewed on the Cantata support page in your own account under IR Devices.'
+                ],
+                [
+                    'type' => 'Label',
+                    'name' => 'Supportlink',
+                    'link' => true,
+                    'caption' => 'https://support.haptique.io/en'
+                ],
+                [
+                    'type' => 'Select',
+                    'name' => 'deviceType',
+                    'caption' => 'Device Type',
+                    'options' => [
+                        ['caption' => 'IR', 'value' => 'IR'],
+                        ['caption' => 'RF', 'value' => 'RF']
+                    ],
+                    'onChange' => 'CRSXKD_UpdateFormVisibility($id);'
+                ],
+                [
+                    'type' => 'ValidationTextBox',
+                    'name' => 'name',
+                    'caption' => 'Device name'
+                ],
+                [
+                    'type' => 'Select',
+                    'name' => 'frequency',
+                    'caption' => 'Frequency',
+                    'visible' => ($this->ReadPropertyString('deviceType') === 'IR'),
+                    'options' => [
+                        ['caption' => '36000', 'value' => 36000],
+                        ['caption' => '38000', 'value' => 38000],
+                        ['caption' => '40000', 'value' => 40000],
+                        ['caption' => '56000', 'value' => 56000]
+                    ]
+                ],
+                [
+                    'type' => 'Select',
+                    'name' => 'codeFormat',
+                    'caption' => 'IR Device Code Format',
+                    'visible' => ($this->ReadPropertyString('deviceType') === 'IR'),
+                    'options' => [
+                        ['caption' => 'RAW', 'value' => 'RAW'],
+                        ['caption' => 'HEX', 'value' => 'HEX']
+                    ]
+                ],
+                [
+                    'type' => 'List',
+                    'name' => 'commands',
+                    'caption' => 'Commands',
+                    'visible' => ($this->ReadPropertyString('deviceType') === 'IR'),
+                    'add' => true,
+                    'delete' => true,
+                    'columns' => [
+                        [
+                            'caption' => 'Command Name',
+                            'name' => 'CommandName',
+                            'width' => '200px',
+                            'edit' => [
+                                'type' => 'ValidationTextBox'
+                            ],
+                            'add' => ''
+                        ],
+                        [
+                            'caption' => 'Command Alias',
+                            'name' => 'CommandAlias',
+                            'width' => '300px',
+                            'edit' => [
+                                'type' => 'ValidationTextBox'
+                            ],
+                            'add' => ''
+                        ],
+                        [
+                            'caption' => 'Command',
+                            'name' => 'Command',
+                            'width' => 'auto',
+                            'edit' => [
+                                'type' => 'ValidationTextBox'
+                            ],
+                            'add' => ''
+                        ],
+                        [
+                            'caption' => 'Repetition',
+                            'name' => 'Repetition',
+                            'width' => '150px',
+                            'edit' => [
+                                'type' => 'NumberSpinner',
+                                'minimum' => 1,
+                                'digits' => 0
+                            ],
+                            'add' => 1
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'List',
+                    'name' => 'rfCommands',
+                    'caption' => 'RF Commands',
+                    'visible' => ($this->ReadPropertyString('deviceType') === 'RF'),
+                    'add' => true,
+                    'delete' => true,
+                    'columns' => [
+                        [
+                            'caption' => 'Command Name',
+                            'name' => 'CommandName',
+                            'width' => '200px',
+                            'edit' => [
+                                'type' => 'ValidationTextBox'
+                            ],
+                            'add' => ''
+                        ],
+                        [
+                            'caption' => 'Alias',
+                            'name' => 'CommandAlias',
+                            'width' => '300px',
+                            'edit' => [
+                                'type' => 'ValidationTextBox'
+                            ],
+                            'add' => ''
+                        ],
+                        [
+                            'caption' => 'Code',
+                            'name' => 'Code',
+                            'width' => 'auto',
+                            'edit' => [
+                                'type' => 'NumberSpinner',
+                                'digits' => 0,
+                                'minimum' => 0
+                            ],
+                            'add' => 0
+                        ],
+                        [
+                            'caption' => 'Bits',
+                            'name' => 'Bits',
+                            'width' => '80px',
+                            'edit' => [
+                                'type' => 'NumberSpinner',
+                                'digits' => 0,
+                                'minimum' => 1
+                            ],
+                            'add' => 24
+                        ],
+                        [
+                            'caption' => 'Protocol',
+                            'name' => 'Protocol',
+                            'width' => '80px',
+                            'edit' => [
+                                'type' => 'NumberSpinner',
+                                'digits' => 0,
+                                'minimum' => 1
+                            ],
+                            'add' => 1
+                        ],
+                        [
+                            'caption' => 'Repetition',
+                            'name' => 'Repetition',
+                            'width' => '150px',
+                            'edit' => [
+                                'type' => 'NumberSpinner',
+                                'digits' => 0,
+                                'minimum' => 1
+                            ],
+                            'add' => 8
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'ExpansionPanel',
+                    'caption' => 'Variableneinstellungen',
+                    'items' => [
+                        [
+                            'type' => 'List',
+                            'name' => 'varSettings',
+                            'caption' => 'Available variables',
+                            'rowCount' => 6,
+                            'add' => false,
+                            'delete' => false,
+                            'columns' => [
+                                [
+                                    'caption' => 'Ident',
+                                    'name' => 'Ident',
+                                    'width' => '180px',
+                                    'save' => true
+                                ],
+                                [
+                                    'caption' => 'Variable',
+                                    'name' => 'Caption',
+                                    'width' => 'auto',
+                                    'save' => true
+                                ],
+                                [
+                                    'caption' => 'Create',
+                                    'name' => 'Enabled',
+                                    'width' => '120px',
+                                    'save' => true,
+                                    'edit' => [
+                                        'type' => 'CheckBox'
+                                    ]
+                                ]
+                            ],
+                            'values' => $this->GetVarSettingsRowsForForm()
+                        ],
+                        [
+                            'type' => 'Label',
+                            'caption' => 'Default: all variables are created. If you disable variables, they will be removed on the next ApplyChanges.'
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'ExpansionPanel',
+                    'caption' => 'Skripterstellung',
+                    'items' => [
+                        [
+                            'type' => 'SelectCategory',
+                            'name' => 'scriptCategory',
+                            'caption' => 'Target category for scripts'
+                        ],
+                        [
+                            'type' => 'Button',
+                            'caption' => 'Create scripts for commands',
+                            'onClick' => 'CRSXKD_CreateCommandScripts($id, $scriptCategory);'
+                        ],
+                        [
+                            'type' => 'Label',
+                            'caption' => 'Creates/updates one script per command in the selected category.'
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'ExpansionPanel',
+                    'caption' => 'Import / Export',
+                    'items' => [
+                        [
+                            'type' => 'CheckBox',
+                            'name' => 'exportIncludeMeta',
+                            'caption' => 'Include meta/variable settings in export'
+                        ],
+                        [
+                            'type' => 'Button',
+                            'caption' => 'Export (create JSON file)',
+                            'onClick' => 'CRSXKD_ExportDeviceDefinition($id);'
+                        ],
+                        [
+                            'type'    => 'Label',
+                            'name'    => 'ExportDownloadLink',
+                            'link'    => true,
+                            'caption' => ($this->ReadAttributeString('lastExportUrl') !== '')
+                                ? ('Export download link: ' . $this->ReadAttributeString('lastExportUrl'))
+                                : 'Export download link: (create an export to generate the link)'
+                        ],
+                        [
+                            'type' => 'SelectFile',
+                            'name' => 'importFile',
+                            'caption' => 'Select import file (JSON)',
+                            'extensions' => '.json'
+                        ],
+                        [
+                            'type' => 'Button',
+                            'caption' => 'Import (apply to this instance)',
+                            'onClick' => 'CRSXKD_ImportDeviceDefinition($id, $importFile);'
+                        ],
+                        [
+                            'type' => 'Label',
+                            'caption' => 'Export creates a JSON file in the Symcon /media folder. Import overwrites deviceType/name/frequency/codeFormat and Commands/RF Commands (including alias and repetition).'
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'Button',
+                    'caption' => 'Export manufacturer CSV',
+                    'onClick' => 'CRSXKD_ExportIRCsv($id);'
+                ]
+            ];
+        }
+
+        /**
+         * Definiert die Aktionen im Konfigurationsformular.
+         *
+         * @return array
+         */
+        protected function FormActions(): array
+        {
+            return [
+                [
+                    'type' => 'PopupAlert',
+                    'name' => 'ExportResultPopup',
+                    'visible' => false,
+                    'popup' => [
+                        'caption' => 'Export',
+                        'closeCaption' => 'Close',
+                        'items' => [
+                            [
+                                'type' => 'Label',
+                                'name' => 'ExportResultText',
+                                'caption' => ''
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    'type' => 'TestCenter'
+                ]
+            ];
+        }
+
+        /**
+         * Gibt den Status für das Formular zurück.
+         *
+         * @return array
+         */
+        protected function FormStatus(): array
+        {
+            return [
+                ['code' => IS_CREATING, 'icon' => 'inactive', 'caption' => 'Creating instance...'],
+                ['code' => IS_ACTIVE, 'icon' => 'active', 'caption' => 'Instance is active.'],
+                ['code' => IS_INACTIVE, 'icon' => 'inactive', 'caption' => 'Instance is inactive.']
+            ];
+        }
+	}
+

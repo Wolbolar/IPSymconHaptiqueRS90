@@ -1,0 +1,49 @@
+{
+    "translations": {
+        "de": {
+            "Host (IPv4)": "Host (IPv4)",
+            "Token": "Token",
+            "Creating instance...": "Instanz wird erstellt...",
+            "Splitter instance is active.": "Splitter-Instanz ist aktiv.",
+            "Splitter instance is inactive.": "Splitter-Instanz ist inaktiv.",
+            "WebSocket Configuration": "WebSocket-Konfiguration",
+            "Host is missing!": "Host fehlt!"
+        },
+        "en": {
+            "Host (IPv4)": "Host (IPv4)",
+            "Token": "Token",
+            "Creating instance...": "Creating instance...",
+            "Splitter instance is active.": "Splitter instance is active.",
+            "Splitter instance is inactive.": "Splitter instance is inactive.",
+            "WebSocket Configuration": "WebSocket Configuration",
+            "Host is missing!": "Host is missing!"
+        },
+        "fr": {
+            "Host (IPv4)": "Hôte (IPv4)",
+            "Token": "Jeton",
+            "Creating instance...": "Création de l’instance...",
+            "Splitter instance is active.": "L’instance Splitter est active.",
+            "Splitter instance is inactive.": "L’instance Splitter est inactive.",
+            "WebSocket Configuration": "Configuration WebSocket",
+            "Host is missing!": "L’hôte est manquant !"
+        },
+        "it": {
+            "Host (IPv4)": "Host (IPv4)",
+            "Token": "Token",
+            "Creating instance...": "Creazione dell’istanza...",
+            "Splitter instance is active.": "L’istanza Splitter è attiva.",
+            "Splitter instance is inactive.": "L’istanza Splitter è inattiva.",
+            "WebSocket Configuration": "Configurazione WebSocket",
+            "Host is missing!": "Host mancante!"
+        },
+        "es": {
+            "Host (IPv4)": "Host (IPv4)",
+            "Token": "Token",
+            "Creating instance...": "Creando la instancia...",
+            "Splitter instance is active.": "La instancia Splitter está activa.",
+            "Splitter instance is inactive.": "La instancia Splitter está inactiva.",
+            "WebSocket Configuration": "Configuración de WebSocket",
+            "Host is missing!": "¡Falta el host!"
+        }
+    }
+}

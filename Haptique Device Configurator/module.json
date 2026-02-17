@@ -1,0 +1,18 @@
+{
+    "id": "{AF18F1D2-4147-AA42-6560-B3BB32BE68A3}",
+    "name": "Haptique Device Configurator",
+    "type": 4,
+    "vendor": "Cantata",
+    "aliases": [
+        "Cantata RS90 Device Configurator"
+    ],
+    "parentRequirements": [
+        "{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{7F7632D9-FA40-4F38-8DEA-C83CD4325A32}"
+    ],
+    "prefix": "CRSDC",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

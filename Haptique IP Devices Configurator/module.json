@@ -1,0 +1,18 @@
+{
+    "id": "{5B2A9AF3-28FB-5143-C3C9-4DC585FA07D5}",
+    "name": "Haptique IP Devices Configurator",
+    "type": 4,
+    "vendor": "Cantata",
+    "aliases": [
+        "Cantata RS90 IP Devices Configurator"
+    ],
+    "parentRequirements": [
+        "{A04B56D8-C2A2-B7BB-11F1-523502DE2933}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}"
+    ],
+    "prefix": "CRIPC",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

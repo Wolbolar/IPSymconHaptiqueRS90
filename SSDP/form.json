@@ -1,0 +1,35 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "label": "You have to configure the local IP address in the IO."
+    },
+    { "type": "Label", "label": "This instance is sending response to device search"},
+    {
+      "type": "Label",
+      "label": "Extended Debug (show all debug messages) / deselect to show only incoming commands"
+    },
+    {
+      "name": "ExtendedDebug",
+      "type": "CheckBox",
+      "caption": "Extended Debug"
+    }
+  ],
+  "status": [
+    {
+      "code": 101,
+      "icon": "inactive",
+      "caption": "Creating instance."
+    },
+    {
+      "code": 102,
+      "icon": "active",
+      "caption": "Config valid"
+    },
+    {
+      "code": 104,
+      "icon": "inactive",
+      "caption": "Interface closed"
+    }
+  ]
+}

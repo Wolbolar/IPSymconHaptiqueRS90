@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="/icons.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: white;
+        }
+        .view {
+            display: none;
+        }
+        .view.active {
+            display: block;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 10px;
+            text-align: left; /* Links-bündige Ausrichtung */
+            cursor: pointer;
+            position: relative;
+        }
+        .icon {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .apply-button {
+            margin-top: 20px;
+            background-color: #FF5722;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Hauptansicht -->
+<div id="mainView" class="view active">
+    <!-- Dynamisch generierte Lautsprecher-Buttons -->
+    {{SONOS_BUTTONS}}
+</div>
+
+<!-- Gruppenansicht -->
+<div id="groupView" class="view">
+    <h2>Gruppe erstellen</h2>
+    <ul class="group-list">
+        <!-- Dynamisch generierte Checkboxen für die Gruppen -->
+        {{SONOS_GROUPS}}  <!-- Platzhalter für die Checkboxen -->
+    </ul>
+    <div class="apply-button" onclick="applyGroup()">Anwenden</div>
+</div>
+
+<!-- Dynamisches Einbinden der JS-Dateien -->
+<script>{{SCRIPT_TO_LOAD}}</script>
+
+</body>
+</html>

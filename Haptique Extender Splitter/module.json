@@ -1,0 +1,16 @@
+{
+    "id": "{D76B102C-9EF5-B193-8E16-990485E6D692}",
+    "name": "Haptique Extender Splitter",
+    "type": 2,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [],
+    "childRequirements": [
+        "{4774FB0A-8B89-BB42-B89F-8A77BB8939C0}"
+    ],
+    "implemented": [
+        "{F73DA342-3026-B3F0-4BAC-896664D56D0C}"
+    ],
+    "prefix": "CRSXEXS",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

@@ -1,0 +1,16 @@
+{
+    "id": "{223A81D9-D037-A052-A2E6-69F2057DAEB3}",
+    "name": "Haptique Macro",
+    "type": 3,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [
+        "{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{7F7632D9-FA40-4F38-8DEA-C83CD4325A32}"
+    ],
+    "prefix": "CRSX",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}
