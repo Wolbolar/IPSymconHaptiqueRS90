@@ -1,0 +1,16 @@
+{
+    "id": "{475D0935-C17C-F98D-558B-0268B75FA78B}",
+    "name": "Haptique Remote",
+    "type": 3,
+    "vendor": "Cantata",
+    "aliases": [],
+    "parentRequirements": [
+        "{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{7F7632D9-FA40-4F38-8DEA-C83CD4325A32}"
+    ],
+    "prefix": "CRSXR",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}
