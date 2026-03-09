@@ -2,14 +2,20 @@
 
 declare(strict_types=1);
 
-class HaptiqueImportConfigurator extends IPSModule
+class HaptiqueImportConfigurator extends IPSModuleStrict
 {
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'require',
+            'moduleIDs' => ['{D5CC2243-C3B3-4C0D-1E07-81701A5FE120}']
+        ]);
+    }
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
 
-        $this->RequireParent('{D5CC2243-C3B3-4C0D-1E07-81701A5FE120}');
 
         $this->RegisterAttributeString('AVDevicesTree', "[]");
         $this->RegisterAttributeInteger('NewIDAVDevice', 0);
@@ -36,13 +42,13 @@ class HaptiqueImportConfigurator extends IPSModule
         $this->RegisterAttributeInteger('NewIDAutomation', 0);
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
@@ -60,7 +66,7 @@ class HaptiqueImportConfigurator extends IPSModule
         return json_decode($response, true);
     }
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $data = json_decode($JSONString, true);
 
@@ -598,7 +604,7 @@ class HaptiqueImportConfigurator extends IPSModule
         }
     }
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $this->SendDebug(__FUNCTION__, 'Konfigurator-Formular wird geladen', 0);
 
@@ -623,11 +629,11 @@ class HaptiqueImportConfigurator extends IPSModule
                 ],
                 [
                     'type' => 'ExpansionPanel',
-                    'caption' => $this->Translate('Device Configuration'),
+                    'caption' => $this->Translate('🧩 Device Configuration'),
                     'items' => [
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate('AV Device'),
+                            "caption" => $this->Translate('🎬 AV Device'),
                             "items" => [
                                 [
                                     "type" => "Tree",
@@ -711,7 +717,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate('Scenes'),
+                            "caption" => $this->Translate('🎭 Scenes'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -830,7 +836,7 @@ class HaptiqueImportConfigurator extends IPSModule
                                 ],
                                 [
                                     'type' => 'ExpansionPanel',
-                                    'caption' => $this->Translate('Add Scene'),
+                                    'caption' => $this->Translate('➕ Add Scene'),
                                     'items' => [
                                         [
                                             'type' => 'RowLayout',
@@ -963,7 +969,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Automations",
+                            "caption" => $this->Translate('⚙️ Automations'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1006,7 +1012,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Lights (Switch)",
+                            "caption" => $this->Translate('💡 Lights (Switch)'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1073,7 +1079,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Switches (Switch)",
+                            "caption" => $this->Translate('🔘 Switches (Switch)'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1140,7 +1146,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Media Player",
+                            "caption" => $this->Translate('🎵 Media Player'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1207,7 +1213,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Temperature Sensor",
+                            "caption" => $this->Translate('🌡️ Temperature Sensor'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1250,7 +1256,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Battery Sensor",
+                            "caption" => $this->Translate('🔋 Battery Sensor'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1293,7 +1299,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Illuminance Sensor",
+                            "caption" => $this->Translate('☀️ Illuminance Sensor'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1336,7 +1342,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Door Lock",
+                            "caption" => $this->Translate('🔐 Door Lock'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1363,7 +1369,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Roller Shutter"),
+                            "caption" => $this->Translate('🪟 Roller Shutter'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1390,7 +1396,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => "Motion Sensor",
+                            "caption" => $this->Translate('🚶 Motion Sensor'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1433,7 +1439,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Air Quality Sensor"),
+                            "caption" => $this->Translate('🌬️ Air Quality Sensor'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1460,7 +1466,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Outlet (Socket)"),
+                            "caption" => $this->Translate('🔌 Outlet (Socket)'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1487,7 +1493,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Thermostat"),
+                            "caption" => $this->Translate('🌡️ Thermostat'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1512,36 +1518,10 @@ class HaptiqueImportConfigurator extends IPSModule
                                 ]
                             ]
                         ],
+
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Door Lock"),
-                            "items" => [
-                                [
-                                    "type" => "Configurator",
-                                    "columns" => [
-                                        [
-                                            "caption" => $this->Translate("ID"),
-                                            "name" => "ID",
-                                            "width" => "100px"
-                                        ],
-                                        [
-                                            "caption" => $this->Translate("Name"),
-                                            "name" => "Name",
-                                            "width" => "auto"
-                                        ],
-                                        [
-                                            "caption" => $this->Translate("Lock Variable"),
-                                            "name" => "LockVariable",
-                                            "width" => "150px"
-                                        ]
-                                    ],
-                                    "values" => []
-                                ]
-                            ]
-                        ],
-                        [
-                            "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Window Covering"),
+                            "caption" => $this->Translate('🪟 Window Covering (Blinds)'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1568,7 +1548,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Contact Sensor"),
+                            "caption" => $this->Translate('🚪 Contact Sensor'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1595,7 +1575,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Smoke Alarm"),
+                            "caption" => $this->Translate('🚨 Smoke Alarm'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1622,7 +1602,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("CO Alarm"),
+                            "caption" => $this->Translate('⚠️ CO Alarm'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1649,7 +1629,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Fan"),
+                            "caption" => $this->Translate('🌀 Fan'),
                             "items" => [
                                 [
                                     "type" => "Configurator",
@@ -1676,7 +1656,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Air Conditioner"),
+                            "caption" => $this->Translate('❄️ Air Conditioner'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1703,7 +1683,7 @@ class HaptiqueImportConfigurator extends IPSModule
                         ],
                         [
                             "type" => "ExpansionPanel",
-                            "caption" => $this->Translate("Garage Door Opener"),
+                            "caption" => $this->Translate('🚗 Garage Door Opener'),
                             "items" => [
                                 [
                                     "type" => "List",
@@ -1733,7 +1713,7 @@ class HaptiqueImportConfigurator extends IPSModule
 
             ],
             'status' => [
-                ['code' => IS_CREATING, 'icon' => 'gear', 'caption' => $this->Translate('Device is being created')],
+                ['code' => IS_CREATING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being created')],
                 ['code' => IS_ACTIVE, 'icon' => 'active', 'caption' => $this->Translate('Device connected and active')],
                 ['code' => IS_DELETING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being deleted')],
                 ['code' => IS_INACTIVE, 'icon' => 'inactive', 'caption' => $this->Translate('Device inactive')],

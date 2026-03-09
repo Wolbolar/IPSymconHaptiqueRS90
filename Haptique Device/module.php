@@ -1,15 +1,19 @@
 <?php
 declare(strict_types=1);
 
-class HaptiqueDevice extends IPSModule
+class HaptiqueDevice extends IPSModuleStrict
 {
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}'] // Parent: MQTT Client (gleich wie im Configurator)
+        ]);
+    }
+    public function Create(): void
     {
         // Never delete this line!
         parent::Create();
-
-        // Parent: MQTT Client (gleich wie im Configurator)
-        $this->ConnectParent('{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}');
 
         // Device identity
         $this->RegisterPropertyString('RemoteID', '');
@@ -34,14 +38,14 @@ class HaptiqueDevice extends IPSModule
         $this->RegisterMessage(0, IPS_KERNELSTARTED);
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         // Never delete this line!
         parent::Destroy();
         $this->SetTimerInterval('DeferredSubscribe', 0);
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         // Never delete this line!
         parent::ApplyChanges();
@@ -87,7 +91,7 @@ class HaptiqueDevice extends IPSModule
 
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
         switch ($Message) {
             case IM_CHANGESTATUS:
@@ -180,7 +184,7 @@ class HaptiqueDevice extends IPSModule
 
     // ---------- Receiving ----------
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         // Falls du weiterhin Encoding-Probleme hast, kannst du hier wie im Configurator konvertieren
         $payload_string = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
@@ -300,7 +304,7 @@ class HaptiqueDevice extends IPSModule
         }
     }
 
-    public function RequestAction($Ident, $Value)
+    public function RequestAction($Ident, $Value): void
     {
         if ($Ident !== 'Command') {
             return;
@@ -374,7 +378,7 @@ class HaptiqueDevice extends IPSModule
 
     // ---------- UI ----------
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $commands = json_decode($this->ReadAttributeString('Commands'), true);
         if (!is_array($commands)) {

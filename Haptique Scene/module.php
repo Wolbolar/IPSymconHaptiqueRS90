@@ -2,14 +2,19 @@
 
 declare(strict_types=1);
 
-class HaptiqueScene extends IPSModule
+class HaptiqueScene extends IPSModuleStrict
 {
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{D5CC2243-C3B3-4C0D-1E07-81701A5FE120}']
+        ]);
+    }
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
-
-        $this->ConnectParent('{D5CC2243-C3B3-4C0D-1E07-81701A5FE120}'); // Connect to existing Parent
 
         $this->RegisterPropertyString("Scenename", "");
         $this->RegisterPropertyString("Description", "");
@@ -19,13 +24,13 @@ class HaptiqueScene extends IPSModule
         $this->RegisterAttributeString("Buttons", '[{"Name":"Button \u2022","VariableID":0,"Value":0,"ButtonLabel":"Erster Button"},{"Name":"Button \u2022\u2022","VariableID":0,"Value":0,"ButtonLabel":"Zweiter Button"},{"Name":"Button \u2022\u2022\u2022","VariableID":0,"Value":0,"ButtonLabel":"Dritter Button"}]');
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
@@ -43,7 +48,7 @@ class HaptiqueScene extends IPSModule
         $this->SendDataToParent(json_encode(['DataID' => '{A04B56D8-C2A2-B7BB-11F1-523502DE2933}']));
     }
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $this->SendDebug(__FUNCTION__, $JSONString, 0);
         $data = json_decode($JSONString, true);
@@ -76,6 +81,7 @@ class HaptiqueScene extends IPSModule
                 $this->SendDebug('ReceiveData', "SceneID stimmt nicht überein: $sceneID", 0);
             }
         }
+        return '';
     }
 
     public function SendButtonCommand(string $button): void
@@ -116,7 +122,7 @@ class HaptiqueScene extends IPSModule
         $this->UpdateFormField('Value', 'variableID', $ID);
     }
 
-    public function UpdateLabelValue($Value, $VariableID)
+    public function UpdateLabelValue(string $Value, int $VariableID): void
     {
         $this->SendDebug('UpdateLabelValue', "Wert: $Value, VariableID: $VariableID", 0);
 
@@ -146,7 +152,7 @@ class HaptiqueScene extends IPSModule
         return $buttons;
     }
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $this->SendDebug(__FUNCTION__, 'Formular wird geladen', 0);
 

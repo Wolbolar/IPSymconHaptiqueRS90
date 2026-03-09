@@ -60,7 +60,17 @@
             "Device connected and active": "Device connected and active",
             "Device is being deleted": "Device is being deleted",
             "Device inactive": "Device inactive",
-            "Device not created or error occurred": "Device not created or error occurred"
+            "Device not created or error occurred": "Device not created or error occurred",
+            "RS90 Devices": "RS90 Devices",
+            "RS90 list": "RS90 list",
+            "Device List": "Device List",
+            "Device list": "Device list",
+            "Macro list": "Macro list",
+            "Remote ID": "Remote ID",
+            "Battery": "Battery",
+            "Device ID": "Device ID",
+            "Macro Name": "Macro Name",
+            "Macro ID": "Macro ID"
         },
         "en-US": {
             "Security Configuration": "Security Configuration",
@@ -122,7 +132,17 @@
             "Device connected and active": "Device connected and active",
             "Device is being deleted": "Device is being deleted",
             "Device inactive": "Device inactive",
-            "Device not created or error occurred": "Device not created or error occurred"
+            "Device not created or error occurred": "Device not created or error occurred",
+            "RS90 Devices": "RS90 Devices",
+            "RS90 list": "RS90 list",
+            "Device List": "Device List",
+            "Device list": "Device list",
+            "Macro list": "Macro list",
+            "Remote ID": "Remote ID",
+            "Battery": "Battery",
+            "Device ID": "Device ID",
+            "Macro Name": "Macro Name",
+            "Macro ID": "Macro ID"
         },
         "en-GB": {
             "Security Configuration": "Security Configuration",
@@ -184,7 +204,17 @@
             "Device connected and active": "Device connected and active",
             "Device is being deleted": "Device is being deleted",
             "Device inactive": "Device inactive",
-            "Device not created or error occurred": "Device not created or error occurred"
+            "Device not created or error occurred": "Device not created or error occurred",
+            "RS90 Devices": "RS90 Devices",
+            "RS90 list": "RS90 list",
+            "Device List": "Device List",
+            "Device list": "Device list",
+            "Macro list": "Macro list",
+            "Remote ID": "Remote ID",
+            "Battery": "Battery",
+            "Device ID": "Device ID",
+            "Macro Name": "Macro Name",
+            "Macro ID": "Macro ID"
         },
         "de": {
             "Security Configuration": "Sicherheit Konfiguration",
@@ -246,7 +276,17 @@
             "Device connected and active": "Gerät verbunden und aktiv",
             "Device is being deleted": "Gerät wird gelöscht",
             "Device inactive": "Gerät inaktiv",
-            "Device not created or error occurred": "Gerät nicht erstellt oder Fehler aufgetreten"
+            "Device not created or error occurred": "Gerät nicht erstellt oder Fehler aufgetreten",
+            "RS90 Devices": "RS90 Geräte",
+            "RS90 list": "RS90 Liste",
+            "Device List": "Geräteliste",
+            "Device list": "Geräteliste",
+            "Macro list": "Makroliste",
+            "Remote ID": "Remote-ID",
+            "Battery": "Batterie",
+            "Device ID": "Geräte-ID",
+            "Macro Name": "Makroname",
+            "Macro ID": "Makro-ID"
         },
         "fr": {
             "Security Configuration": "Configuration de sécurité",
@@ -305,7 +345,17 @@
             "Device connected and active": "Appareil connecté et actif",
             "Device is being deleted": "L'appareil est en cours de suppression",
             "Device inactive": "Appareil inactif",
-            "Device not created or error occurred": "Appareil non créé ou erreur survenue"
+            "Device not created or error occurred": "Appareil non créé ou erreur survenue",
+            "RS90 Devices": "Appareils RS90",
+            "RS90 list": "Liste RS90",
+            "Device List": "Liste des appareils",
+            "Device list": "Liste des appareils",
+            "Macro list": "Liste des macros",
+            "Remote ID": "ID de la télécommande",
+            "Battery": "Batterie",
+            "Device ID": "ID de l'appareil",
+            "Macro Name": "Nom de la macro",
+            "Macro ID": "ID de la macro"
         },
         "it": {
             "Security Configuration": "Configurazione della sicurezza",
@@ -364,7 +414,17 @@
             "Device connected and active": "Dispositivo connesso e attivo",
             "Device is being deleted": "Il dispositivo è in fase di eliminazione",
             "Device inactive": "Dispositivo inattivo",
-            "Device not created or error occurred": "Dispositivo non creato o errore"
+            "Device not created or error occurred": "Dispositivo non creato o errore",
+            "RS90 Devices": "Dispositivi RS90",
+            "RS90 list": "Elenco RS90",
+            "Device List": "Elenco dispositivi",
+            "Device list": "Elenco dispositivi",
+            "Macro list": "Elenco macro",
+            "Remote ID": "ID telecomando",
+            "Battery": "Batteria",
+            "Device ID": "ID dispositivo",
+            "Macro Name": "Nome macro",
+            "Macro ID": "ID macro"
         },
         "nl": {
             "Security Configuration": "Beveiligingsconfiguratie",
@@ -423,7 +483,17 @@
             "Device connected and active": "Apparaat verbonden en actief",
             "Device is being deleted": "Apparaat wordt verwijderd",
             "Device inactive": "Apparaat inactief",
-            "Device not created or error occurred": "Apparaat niet gemaakt of fout opgetreden"
+            "Device not created or error occurred": "Apparaat niet gemaakt of fout opgetreden",
+            "RS90 Devices": "RS90-apparaten",
+            "RS90 list": "RS90-lijst",
+            "Device List": "Apparatenlijst",
+            "Device list": "Apparatenlijst",
+            "Macro list": "Macrolijst",
+            "Remote ID": "Afstandsbediening-ID",
+            "Battery": "Batterij",
+            "Device ID": "Apparaat-ID",
+            "Macro Name": "Macronaam",
+            "Macro ID": "Macro-ID"
         },
         "hi": {
             "Security Configuration": "सुरक्षा कॉन्फ़िगरेशन",
@@ -482,7 +552,17 @@
             "Device connected and active": "डिवाइस जुड़ा हुआ और सक्रिय",
             "Device is being deleted": "डिवाइस हटाया जा रहा है",
             "Device inactive": "डिवाइस निष्क्रिय",
-            "Device not created or error occurred": "डिवाइस नहीं बनाया गया या त्रुटि हुई"
+            "Device not created or error occurred": "डिवाइस नहीं बनाया गया या त्रुटि हुई",
+            "RS90 Devices": "RS90 डिवाइस",
+            "RS90 list": "RS90 सूची",
+            "Device List": "डिवाइस सूची",
+            "Device list": "डिवाइस सूची",
+            "Macro list": "मैक्रो सूची",
+            "Remote ID": "रिमोट आईडी",
+            "Battery": "बैटरी",
+            "Device ID": "डिवाइस आईडी",
+            "Macro Name": "मैक्रो नाम",
+            "Macro ID": "मैक्रो आईडी"
         },
         "zh": {
             "Security Configuration": "安全配置",
@@ -541,7 +621,17 @@
             "Device connected and active": "设备已连接且处于活动状态",
             "Device is being deleted": "设备正在删除",
             "Device inactive": "设备处于非活动状态",
-            "Device not created or error occurred": "设备未创建或发生错误"
+            "Device not created or error occurred": "设备未创建或发生错误",
+            "RS90 Devices": "RS90设备",
+            "RS90 list": "RS90列表",
+            "Device List": "设备列表",
+            "Device list": "设备列表",
+            "Macro list": "宏列表",
+            "Remote ID": "遥控器ID",
+            "Battery": "电池",
+            "Device ID": "设备ID",
+            "Macro Name": "宏名称",
+            "Macro ID": "宏ID"
         },
         "ru": {
             "Security Configuration": "Конфигурация безопасности",
@@ -600,7 +690,17 @@
             "Device connected and active": "Устройство подключено и активно",
             "Device is being deleted": "Устройство удаляется",
             "Device inactive": "Устройство неактивно",
-            "Device not created or error occurred": "Устройство не создано или произошла ошибка"
+            "Device not created or error occurred": "Устройство не создано или произошла ошибка",
+            "RS90 Devices": "Устройства RS90",
+            "RS90 list": "Список RS90",
+            "Device List": "Список устройств",
+            "Device list": "Список устройств",
+            "Macro list": "Список макросов",
+            "Remote ID": "ID пульта",
+            "Battery": "Батарея",
+            "Device ID": "ID устройства",
+            "Macro Name": "Имя макроса",
+            "Macro ID": "ID макроса"
         }
     }
 }

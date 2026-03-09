@@ -9,12 +9,13 @@ declare(strict_types=1);
 //include_once __DIR__ . '/simulate.php';
 require_once __DIR__ . '/../libs/WebSocketUtils.php';
 require_once __DIR__ . '/../libs/DenonMarantzAVRModels.php';  // diverse Klassen
+require_once __DIR__ . '/../libs/DebugTrait.php';
 
 include_once __DIR__ . '/../libs/ClientSessionManagement.php';
 
 use WebsocketHandler\WebSocketUtils;
 
-class HaptiqueSplitter extends IPSModule
+class HaptiqueSplitter extends IPSModuleStrict
 {
     use ClientSessionTrait;
 
@@ -26,7 +27,7 @@ class HaptiqueSplitter extends IPSModule
     const Haptique_Driver_Version = "0.2.0";
     const BASE_URL = "https://app.cantatacs.com";
 
-    public function Create()
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
@@ -576,38 +577,38 @@ class HaptiqueSplitter extends IPSModule
         return $this->SendCommandToRS90('ping');
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         // Debug-Information zur Überprüfung, dass Destroy aufgerufen wird
         $this->SendDebug('Destroy', 'Destroy-Methode wird aufgerufen', 0);
 
         // Webhook löschen, falls dieser existiert
-        $this->UnregisterHook('/hook/cantata');
+        $this->UnregisterHook('cantata');
 
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
 
         //Only call this in READY state. On startup the WebHook instance might not be available yet
         if (IPS_GetKernelRunlevel() == KR_READY) {
-            $this->RegisterHook('/hook/cantata');
+            $this->RegisterHook('cantata');
             $this->RegisterMdnsService();
         }
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
         //Never delete this line!
         parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
         if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
             $this->SendDebug(__FUNCTION__, '✅ Kernel READY – sende Initial-Events', 0);
-            $this->RegisterHook('/hook/cantata');
+            $this->RegisterHook('cantata');
             $this->RegisterMdnsService();
         }
     }
@@ -651,7 +652,7 @@ class HaptiqueSplitter extends IPSModule
         }
     }
 
-    public function ForwardData($JSONString)
+    public function ForwardData($JSONString): string
     {
         $data = json_decode($JSONString, true);
         $this->SendDebug(__FUNCTION__, 'ForwardData raw: ' . $JSONString, 0);
@@ -781,54 +782,7 @@ class HaptiqueSplitter extends IPSModule
         return json_encode(['Success' => false, 'Error' => 'Kein gültiger Action oder Command angegeben']);
     }
 
-    private function RegisterHook($WebHook)
-    {
-        $ids = IPS_GetInstanceListByModuleID('{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}');
-        if (count($ids) > 0) {
-            $hooks = json_decode(IPS_GetProperty($ids[0], 'Hooks'), true);
-            $found = false;
-            foreach ($hooks as $index => $hook) {
-                if ($hook['Hook'] == $WebHook) {
-                    if ($hook['TargetID'] == $this->InstanceID) {
-                        return;
-                    }
-                    $hooks[$index]['TargetID'] = $this->InstanceID;
-                    $found = true;
-                }
-            }
-            if (!$found) {
-                $hooks[] = ['Hook' => $WebHook, 'TargetID' => $this->InstanceID];
-            }
-            IPS_SetProperty($ids[0], 'Hooks', json_encode($hooks));
-            IPS_ApplyChanges($ids[0]);
-        }
-    }
-
-    private function UnregisterHook($WebHook)
-    {
-        // Hole die Liste der Instanzen des WebInterface-Moduls
-        $ids = IPS_GetInstanceListByModuleID('{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}');
-
-        if (count($ids) > 0) {
-            // Hole die aktuelle Hook-Liste
-            $hooks = json_decode(IPS_GetProperty($ids[0], 'Hooks'), true);
-
-            // Gehe die Hooks durch und finde den passenden Eintrag
-            foreach ($hooks as $index => $hook) {
-                if ($hook['Hook'] == $WebHook && $hook['TargetID'] == $this->InstanceID) {
-                    // Lösche den Webhook-Eintrag
-                    unset($hooks[$index]);
-                    break;
-                }
-            }
-
-            // Speichere die geänderte Hook-Liste
-            IPS_SetProperty($ids[0], 'Hooks', json_encode(array_values($hooks))); // array_values um die Indizes neu zu ordnen
-            IPS_ApplyChanges($ids[0]);
-        }
-    }
-
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $this->SendDebugExtended(__FUNCTION__, '📥 Raw Data: ' . $JSONString, 0);
 
@@ -836,7 +790,7 @@ class HaptiqueSplitter extends IPSModule
         if (!is_array($data)) {
             $this->SendDebugExtended(__FUNCTION__, '❌ JSON-Parsing fehlgeschlagen: ' . json_last_error_msg(), 0);
             $this->SendDebugExtended(__FUNCTION__, '📥 Ursprünglicher JSON-String: ' . $JSONString, 0);
-            return;
+            return '';
         }
         $this->SendDebugExtended(__FUNCTION__, '✅ JSON erfolgreich dekodiert', 0);
 
@@ -877,6 +831,7 @@ class HaptiqueSplitter extends IPSModule
             'ClientIP' => $clientIP,
             'ClientPort' => $clientPort
         ]));
+        return '';
     }
 
     private function SendDebugExtended(string $function, string $message, int $format): void
@@ -886,7 +841,7 @@ class HaptiqueSplitter extends IPSModule
         }
     }
 
-    public function ProcessHookData()
+    public function ProcessHookData(): void
     {
         $this->SendDebug(__FUNCTION__, 'Hook wurde aufgerufen', 0);
         // Methode und Anfrage-Art auslesen
@@ -1727,7 +1682,7 @@ class HaptiqueSplitter extends IPSModule
         $this->SendDebug('Response', 'IP-Symcon Response', 0);
     }
 
-    public function RequestAction($Ident, $Value)
+    public function RequestAction($Ident, $Value): void
     {
         switch ($Ident) {
             case "EditLightSwitch":
@@ -2325,7 +2280,7 @@ class HaptiqueSplitter extends IPSModule
         $this->SendDebug('HaptiqueEmulator', "Fehler gesendet: $code $statusText – $message", 0);
     }
 
-    public function NewIDLightSwitch($LightSwitches)
+    public function NewIDLightSwitch(string $LightSwitches): void
     {
         $values = [];
         foreach ($LightSwitches as $target) {
@@ -2423,7 +2378,7 @@ class HaptiqueSplitter extends IPSModule
     }
 
     // Methode zur Überprüfung des Variablentyps
-    public function CheckVariableType($variableID)
+    public function CheckVariableType(int $variableID): string
     {
         $variable = IPS_GetVariable($variableID);
 
@@ -2726,7 +2681,7 @@ class HaptiqueSplitter extends IPSModule
         return $extractedCommands;
     }
 
-    public function OnCheckboxClick1($AVDevicesTree)
+    public function OnCheckboxClick1(string $AVDevicesTree): void
     {
         $this->SendDebug('OnCheckboxClick', 'triggered', 0);
 
@@ -2795,7 +2750,7 @@ class HaptiqueSplitter extends IPSModule
     }
 
 
-    public function FormFieldUpdate(string $field, string $parameter, $value)
+    public function FormFieldUpdate(string $field, string $parameter, string $value): void
     {
         $this->UpdateFormField($field, $parameter, $value);
     }
@@ -3037,7 +2992,7 @@ class HaptiqueSplitter extends IPSModule
         return $device_id;
     }
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $form = [
             "elements" => [
@@ -3335,7 +3290,7 @@ class HaptiqueSplitter extends IPSModule
                 ]
             ],
             'status' => [
-                ['code' => IS_CREATING, 'icon' => 'gear', 'caption' => $this->Translate('Device is being created')],
+                ['code' => IS_CREATING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being created')],
                 ['code' => IS_ACTIVE, 'icon' => 'active', 'caption' => $this->Translate('Device connected and active')],
                 ['code' => IS_DELETING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being deleted')],
                 ['code' => IS_INACTIVE, 'icon' => 'inactive', 'caption' => $this->Translate('Device inactive')],

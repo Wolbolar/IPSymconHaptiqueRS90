@@ -1,27 +1,27 @@
 <?php
 
 declare(strict_types=1);
-	class HaptiqueExtenderSplitter extends IPSModule
+	class HaptiqueExtenderSplitter extends IPSModuleStrict
 	{
-		public function Create()
-		{
+		public function Create(): void
+        {
 			//Never delete this line!
 			parent::Create();
 		}
 
-		public function Destroy()
-		{
+		public function Destroy(): void
+        {
 			//Never delete this line!
 			parent::Destroy();
 		}
 
-		public function ApplyChanges()
-		{
+		public function ApplyChanges(): void
+        {
 			//Never delete this line!
 			parent::ApplyChanges();
 		}
 
-        public function GetConfigurationForm()
+        public function GetConfigurationForm(): string
         {
             $Form = json_encode([
                 'elements' => $this->FormElements(),

@@ -2,14 +2,20 @@
 
 declare(strict_types=1);
 
-class HaptiqueDeviceConfigurator extends IPSModule
+class HaptiqueDeviceConfigurator extends IPSModuleStrict
 {
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}'] // Parent: MQTT Client (gleich wie im Configurator)
+        ]);
+    }
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
 
-        $this->ConnectParent('{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}');
 
         $this->RegisterAttributeString('HaptiqueDevices', "[]");
         // Per-Remote storage (multiple RS90 in one network)
@@ -20,13 +26,13 @@ class HaptiqueDeviceConfigurator extends IPSModule
         $this->RegisterAttributeString('BatteryByRemote', '{}');           // JSON object: { remoteId: 87 }
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
@@ -460,7 +466,7 @@ class HaptiqueDeviceConfigurator extends IPSModule
         return $macroRows;
     }
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $payload_string = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
 
@@ -516,11 +522,7 @@ class HaptiqueDeviceConfigurator extends IPSModule
         return '';
     }
 
-
-
-
-
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $this->SendDebug(__FUNCTION__, 'Konfigurator-Formular wird geladen', 0);
 
@@ -674,7 +676,7 @@ class HaptiqueDeviceConfigurator extends IPSModule
                 ],
             ],
             'status' => [
-                ['code' => IS_CREATING, 'icon' => 'gear', 'caption' => $this->Translate('Device is being created')],
+                ['code' => IS_CREATING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being created')],
                 ['code' => IS_ACTIVE, 'icon' => 'active', 'caption' => $this->Translate('Device connected and active')],
                 ['code' => IS_DELETING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being deleted')],
                 ['code' => IS_INACTIVE, 'icon' => 'inactive', 'caption' => $this->Translate('Device inactive')],

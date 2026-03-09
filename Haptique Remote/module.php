@@ -2,10 +2,16 @@
 
 declare(strict_types=1);
 
-class HaptiqueRemote extends IPSModule
+class HaptiqueRemote extends IPSModuleStrict
 {
-
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}']
+        ]);
+    }
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
@@ -14,7 +20,6 @@ class HaptiqueRemote extends IPSModule
         $this->RegisterPropertyString('RemoteModel', 'RX90');
         $this->RegisterPropertyString('RemoteID', '');
 
-        $this->ConnectParent('{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}');
 
         // Variables
         $this->RegisterVariableString('CurrentRoom', $this->Translate('Current Room'), '', 1);
@@ -30,13 +35,13 @@ class HaptiqueRemote extends IPSModule
 
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
@@ -52,7 +57,7 @@ class HaptiqueRemote extends IPSModule
     }
 
     // RequestAction method for all variables
-    public function RequestAction($Ident, $Value)
+    public function RequestAction($Ident, $Value): void
     {
         switch ($Ident) {
             case 'Volume':
@@ -197,7 +202,7 @@ class HaptiqueRemote extends IPSModule
         return $map[$btn] ?? ('Button' . $btn);
     }
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $payloadString = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
 
@@ -286,7 +291,7 @@ class HaptiqueRemote extends IPSModule
         return '';
     }
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         // Configuration form as an array
         $form = [

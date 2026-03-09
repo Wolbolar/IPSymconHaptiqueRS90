@@ -1,7 +1,7 @@
 <?php
 
 declare(strict_types=1);
-	class HaptiqueKinconyDevice extends IPSModule
+	class HaptiqueKinconyDevice extends IPSModuleStrict
 	{
         /**
          * Kincony AG Hub (Haptique Extender) HTTP API client
@@ -16,13 +16,21 @@ declare(strict_types=1);
          * Source reference: Cantata-Communication-Solutions/KinkonyAGFW repo (README/tools).  [oai_citation:1‡GitHub](https://github.com/Cantata-Communication-Solutions/KinkonyAGFW?utm_source=chatgpt.com)
          */
 
-        public function Create()
-		{
+        public function GetCompatibleParents(): string
+        {
+            // Connect to the Kincony Splitter
+            return json_encode([
+                'type' => 'connect',
+                'moduleIDs' => [
+                    '{2743570F-B180-0216-9564-FBDB8F1926A4}'
+                ]
+            ]);
+        }
+
+        public function Create(): void
+        {
 			//Never delete this line!
 			parent::Create();
-
-            // Connect to the Kincony Splitter
-            $this->ConnectParent('{2743570F-B180-0216-9564-FBDB8F1926A4}');
 
             // Wartet, bis der Kernel gestartet ist
             $this->RegisterMessage(0, IPS_KERNELMESSAGE);
@@ -43,21 +51,39 @@ declare(strict_types=1);
             $this->RegisterPropertyBoolean("exportIncludeMeta", true); // Export enthält Meta/Status
 		}
 
-		public function Destroy()
-		{
+		public function Destroy(): void
+        {
 			//Never delete this line!
 			parent::Destroy();
 		}
 
-        public function ApplyChanges()
+        public function ApplyChanges(): void
         {
             //Never delete this line!
             parent::ApplyChanges();
 
-            $this->NormalizeVarSettings();
-            $this->SendDebug('ApplyChanges', 'After NormalizeVarSettings varSettings(raw)=' . $this->ReadPropertyString('varSettings'), 0);
-            $this->EnsureCommandProfileAndVariable();
-            $this->UpdateFormVisibility();
+            try {
+                // If we have no parent connection yet, remain inactive (module not ready)
+                $parentID = (int)IPS_GetInstance($this->InstanceID)['ConnectionID'];
+                if ($parentID <= 0) {
+                    $this->SendDebug(__FUNCTION__, '⏸️ No parent connection. Setting status to INACTIVE.', 0);
+                    $this->SetStatus(IS_INACTIVE);
+                    return;
+                }
+
+                // Mark active early to avoid being stuck in "creating"
+                $this->SetStatus(IS_ACTIVE);
+
+                $this->NormalizeVarSettings();
+                $this->SendDebug('ApplyChanges', 'After NormalizeVarSettings varSettings(raw)=' . $this->ReadPropertyString('varSettings'), 0);
+
+                $this->EnsureCommandProfileAndVariable();
+                $this->UpdateFormVisibility();
+
+            } catch (Throwable $e) {
+                $this->SendDebug(__FUNCTION__, '❌ ApplyChanges exception: ' . $e->getMessage(), 0);
+                $this->SetStatus(IS_EBASE);
+            }
         }
 
 
@@ -125,7 +151,7 @@ declare(strict_types=1);
             return '';
         }
 
-        public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+        public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
         {
             switch ($Message) {
                 case IPS_KERNELMESSAGE:
@@ -149,18 +175,19 @@ declare(strict_types=1);
             }
         }
 
-        public function ReceiveData($JSONString)
+        public function ReceiveData($JSONString): string
         {
             $data = json_decode($JSONString, true);
 
             if ($data === null) {
                 $this->SendDebug("ReceiveData", "❌ Invalid JSON data received!", 0);
-                return;
+                return '';
             }
             $this->SendDebug(__FUNCTION__, $JSONString, 0);
+            return '';
         }
 
-        public function RequestAction($Ident, $Value)
+        public function RequestAction($Ident, $Value): void
         {
             switch ($Ident) {
                 case 'Command':
@@ -332,21 +359,21 @@ declare(strict_types=1);
             $enabled = $this->GetVarEnabledMap();
 
             // Store last command meta (even if IR has no feedback)
-            if (($enabled['LastCommandName'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandName'))) {
-                SetValueString($this->GetIDForIdent('LastCommandName'), $cmdName);
+            if (($enabled['LastCommandName'] ?? true) && @$this->GetIDForIdent('LastCommandName') > 0) {
+                $this->SetValue('LastCommandName', $cmdName);
             }
-            if (($enabled['LastCommandAlias'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandAlias'))) {
-                SetValueString($this->GetIDForIdent('LastCommandAlias'), $cmdAlias);
+            if (($enabled['LastCommandAlias'] ?? true) && @$this->GetIDForIdent('LastCommandAlias') > 0) {
+                $this->SetValue('LastCommandAlias', $cmdAlias);
             }
-            if (($enabled['LastCommandIndex'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandIndex'))) {
-                SetValueInteger($this->GetIDForIdent('LastCommandIndex'), $index);
+            if (($enabled['LastCommandIndex'] ?? true) && @$this->GetIDForIdent('LastCommandIndex') > 0) {
+                $this->SetValue('LastCommandIndex', $index);
             }
-            if (($enabled['LastCommandSentAt'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('LastCommandSentAt'))) {
-                SetValueInteger($this->GetIDForIdent('LastCommandSentAt'), time());
+            if (($enabled['LastCommandSentAt'] ?? true) && @$this->GetIDForIdent('LastCommandSentAt') > 0) {
+                $this->SetValue('LastCommandSentAt', time());
             }
-            if (($enabled['CurrentAlias'] ?? true) && @IPS_VariableExists($this->GetIDForIdent('CurrentAlias'))) {
+            if (($enabled['CurrentAlias'] ?? true) && @$this->GetIDForIdent('CurrentAlias') > 0) {
                 // For simple devices like a screen, treat the last alias as the current assumed state
-                SetValueString($this->GetIDForIdent('CurrentAlias'), $cmdAlias);
+                $this->SetValue('CurrentAlias', $cmdAlias);
             }
 
             $repeat = isset($row['Repetition']) ? (int)$row['Repetition'] : 1;
@@ -942,7 +969,7 @@ declare(strict_types=1);
         }
 
 
-        public function GetConfigurationForm()
+        public function GetConfigurationForm(): string
         {
             $Form = json_encode([
                 'elements' => $this->FormElements(),

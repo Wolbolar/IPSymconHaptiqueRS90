@@ -1,15 +1,24 @@
 <?php
 
 declare(strict_types=1);
-	class HaptiqueKinconyHub extends IPSModule
+	class HaptiqueKinconyHub extends IPSModuleStrict
 	{
-		public function Create()
-		{
+        public function GetCompatibleParents(): string
+        {
+            // Erzwinge eine eigene WebSocket-Instanz, falls keine existiert
+            return json_encode([
+                'type' => 'require',
+                'moduleIDs' => [
+                    '{D68FD31F-0E90-7019-F16C-1949BD3079EF}' // WebSocket Client
+                ]
+            ]);
+        }
+
+        public function Create(): void
+        {
 			//Never delete this line!
 			parent::Create();
 
-            // Erzwinge eine eigene WebSocket-Instanz, falls keine existiert
-            $this->RequireParent('{D68FD31F-0E90-7019-F16C-1949BD3079EF}'); // WebSocket Client
 
             $this->RegisterPropertyString("host", "");
             $this->RegisterPropertyString("token", "");
@@ -43,19 +52,19 @@ declare(strict_types=1);
             $this->RegisterMessage(0, IPS_KERNELMESSAGE);
 		}
 
-		public function Destroy()
-		{
+		public function Destroy(): void
+        {
             // Debug-Information zur Überprüfung, dass Destroy aufgerufen wird
             $this->SendDebug('Destroy', 'Destroy-Methode wird aufgerufen', 0);
 
             // Webhook löschen, falls dieser existiert
-            $this->UnregisterHook('/hook/haptique_kinconyhub/' . $this->InstanceID . '/download');
+            $this->UnregisterHook('haptique_kinconyhub/' . $this->InstanceID . '/download');
 
             //Never delete this line!
 			parent::Destroy();
 		}
 
-        public function ApplyChanges()
+        public function ApplyChanges(): void
         {
             //Never delete this line!
             parent::ApplyChanges();
@@ -74,7 +83,7 @@ declare(strict_types=1);
 
             //Only call this in READY state. On startup the WebHook instance might not be available yet
             if (IPS_GetKernelRunlevel() == KR_READY) {
-                $this->RegisterHook('/hook/haptique_kinconyhub/' . $this->InstanceID . '/download');
+                $this->RegisterHook('haptique_kinconyhub/' . $this->InstanceID . '/download');
             }
 
             // Set module status explicitly
@@ -97,65 +106,17 @@ declare(strict_types=1);
             }
         }
 
-        public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+        public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
         {
             //Never delete this line!
             parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
             if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
                 $this->SendDebug(__FUNCTION__, '✅ Kernel READY – sende Initial-Events', 0);
-                $this->RegisterHook('/hook/haptique_kinconyhub/' . $this->InstanceID . '/download');
+                $this->RegisterHook('haptique_kinconyhub/' . $this->InstanceID . '/download');
             }
         }
 
-        private function RegisterHook($WebHook)
-        {
-            $this->SendDebug('HOOK', 'RegisterHook called for ' . $WebHook, 0);
-            $ids = IPS_GetInstanceListByModuleID('{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}');
-            if (count($ids) > 0) {
-                $hooks = json_decode(IPS_GetProperty($ids[0], 'Hooks'), true);
-                $found = false;
-                foreach ($hooks as $index => $hook) {
-                    if ($hook['Hook'] == $WebHook) {
-                        if ($hook['TargetID'] == $this->InstanceID) {
-                            return;
-                        }
-                        $hooks[$index]['TargetID'] = $this->InstanceID;
-                        $found = true;
-                    }
-                }
-                if (!$found) {
-                    $hooks[] = ['Hook' => $WebHook, 'TargetID' => $this->InstanceID];
-                }
-                IPS_SetProperty($ids[0], 'Hooks', json_encode($hooks));
-                IPS_ApplyChanges($ids[0]);
-            }
-        }
-
-        private function UnregisterHook($WebHook)
-        {
-            $this->SendDebug('HOOK', 'UnregisterHook called for ' . $WebHook, 0);
-            // Hole die Liste der Instanzen des WebInterface-Moduls
-            $ids = IPS_GetInstanceListByModuleID('{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}');
-
-            if (count($ids) > 0) {
-                // Hole die aktuelle Hook-Liste
-                $hooks = json_decode(IPS_GetProperty($ids[0], 'Hooks'), true);
-
-                // Gehe die Hooks durch und finde den passenden Eintrag
-                foreach ($hooks as $index => $hook) {
-                    if ($hook['Hook'] == $WebHook && $hook['TargetID'] == $this->InstanceID) {
-                        // Lösche den Webhook-Eintrag
-                        unset($hooks[$index]);
-                        break;
-                    }
-                }
-
-                // Speichere die geänderte Hook-Liste
-                IPS_SetProperty($ids[0], 'Hooks', json_encode(array_values($hooks))); // array_values um die Indizes neu zu ordnen
-                IPS_ApplyChanges($ids[0]);
-            }
-        }
 
         /**
          * WebHook handler (download exported files from /media subfolder).
@@ -163,7 +124,7 @@ declare(strict_types=1);
          * URL pattern:
          *   /hook/haptique_kinconyhub/<InstanceID>/download?file=<filename>&token=<secret>
          */
-        public function ProcessHookData()
+        public function ProcessHookData(): void
         {
             $uri = (string)($_SERVER['REQUEST_URI'] ?? '');
             $qs = (string)($_SERVER['QUERY_STRING'] ?? '');
@@ -292,7 +253,7 @@ declare(strict_types=1);
             return '/hook/haptique_kinconyhub/' . $this->InstanceID . '/download?file=' . rawurlencode($filename) . '&token=' . rawurlencode($secret);
         }
 
-        public function ForwardData($JSONString)
+        public function ForwardData($JSONString): string
         {
             $this->SendDebug(__FUNCTION__, $JSONString, 0);
 
@@ -563,20 +524,20 @@ declare(strict_types=1);
             return json_encode($result);
         }
 
-        public function ReceiveData($JSONString)
+        public function ReceiveData($JSONString): string
         {
             $this->SendDebug(__FUNCTION__, "Received JSON: " . $JSONString, 0);
             $data = json_decode($JSONString, true);
 
             if ($data === null) {
                 $this->SendDebug(__FUNCTION__, "❌ Invalid JSON data received!", 0);
-                return;
+                return '';
             }
 
             // Prüfen, ob ein Buffer existiert
             if (!isset($data["Buffer"])) {
                 $this->SendDebug(__FUNCTION__, "⚠️ No Buffer found in received data!", 0);
-                return;
+                return '';
             }
 
             // Buffer-Daten dekodieren
@@ -584,7 +545,7 @@ declare(strict_types=1);
 
             if ($buffer === null) {
                 $this->SendDebug(__FUNCTION__, "❌ Failed to decode Buffer JSON!", 0);
-                return;
+                return '';
             }
 
             // 🟢 WICHTIG: Weiterleiten der Daten
@@ -592,6 +553,7 @@ declare(strict_types=1);
                 'DataID' => '{EFA2DD6A-05BC-CCD8-CCE7-406880F9E98A}',
                 'Buffer' => $data["Buffer"]
             ]));
+            return '';
         }
 
         /**
@@ -607,8 +569,8 @@ declare(strict_types=1);
             }
 
             try {
-                $this->getStatus();
-                // getStatus() already updates attributes via UpdateStatusAttributes()
+                $this->FetchHubStatus();
+                // FetchHubStatus() already updates attributes via UpdateStatusAttributes()
                 $this->WriteAttributeString('StatusLastUpdate', date('Y-m-d H:i:s'));
                 $this->SetValue('HubOnline', true);
                 $this->SendDebug('PollStatus', '✅ Hub reachable, status updated', 0);
@@ -624,7 +586,7 @@ declare(strict_types=1);
          * --------------------------- */
 
         /** GET /api/status */
-        public function getStatus(): array
+        public function FetchHubStatus(): array
         {
             $status = $this->requestJson("GET", "/api/status");
 
@@ -878,7 +840,7 @@ declare(strict_types=1);
             return $out;
         }
 
-        public function GetConfigurationForParent()
+        public function GetConfigurationForParent(): string
         {
             $host = $this->ReadPropertyString("host");
 
@@ -900,7 +862,7 @@ declare(strict_types=1);
             return json_encode($config);
         }
 
-        public function GetConfigurationForm()
+        public function GetConfigurationForm(): string
         {
             $Form = json_encode([
                 'elements' => $this->FormElements(),
@@ -1016,7 +978,7 @@ declare(strict_types=1);
                 [
                     'type'    => 'Button',
                     'caption' => 'Update status now',
-                    'onClick' => 'CRSXKH_getStatus($id);'
+                    'onClick' => 'CRSXKH_FetchHubStatus($id);'
                 ],
                 [
                     'type'    => 'Button',

@@ -1,24 +1,30 @@
 <?php
 
 declare(strict_types=1);
-	class HaptiqueExtender extends IPSModule
+	class HaptiqueExtender extends IPSModuleStrict
 	{
-		public function Create()
-		{
+        public function GetCompatibleParents(): string
+        {
+            return json_encode([
+                'type' => 'require',
+                'moduleIDs' => ['{D76B102C-9EF5-B193-8E16-990485E6D692}']
+            ]);
+        }
+        public function Create(): void
+        {
 			//Never delete this line!
 			parent::Create();
 
-			$this->RequireParent('{D76B102C-9EF5-B193-8E16-990485E6D692}');
 		}
 
-		public function Destroy()
-		{
+		public function Destroy(): void
+        {
 			//Never delete this line!
 			parent::Destroy();
 		}
 
-		public function ApplyChanges()
-		{
+		public function ApplyChanges(): void
+        {
 			//Never delete this line!
 			parent::ApplyChanges();
 		}
@@ -28,13 +34,13 @@ declare(strict_types=1);
 			$this->SendDataToParent(json_encode(['DataID' => '{F73DA342-3026-B3F0-4BAC-896664D56D0C}']));
 		}
 
-		public function ReceiveData($JSONString)
-		{
+		public function ReceiveData($JSONString): string
+        {
 			$data = json_decode($JSONString);
-			IPS_LogMessage('Device RECV', utf8_decode($data->Buffer));
+			return '';
 		}
 
-        public function GetConfigurationForm()
+        public function GetConfigurationForm(): string
         {
             $Form = json_encode([
                 'elements' => $this->FormElements(),

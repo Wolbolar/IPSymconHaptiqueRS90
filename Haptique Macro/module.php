@@ -1,14 +1,20 @@
 <?php
 declare(strict_types=1);
 
-class HaptiqueMacro extends IPSModule
+class HaptiqueMacro extends IPSModuleStrict
 {
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}']
+        ]);
+    }
+
+    public function Create(): void
     {
         // Never delete this line!
         parent::Create();
-
-        $this->ConnectParent('{F7A0DD2E-7684-95C0-64C2-D2A9DC47577B}');
 
         $this->RegisterPropertyString('MacroName', '');
         $this->RegisterPropertyString('MacroID', '');
@@ -25,13 +31,13 @@ class HaptiqueMacro extends IPSModule
         $this->SetVisualizationType(0); // 1 Tile
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         // Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         // Never delete this line!
         parent::ApplyChanges();
@@ -71,7 +77,7 @@ class HaptiqueMacro extends IPSModule
     }
 
     // RequestAction method for all variables
-    public function RequestAction($Ident, $Value)
+    public function RequestAction($Ident, $Value): void
     {
         switch ($Ident) {
             case 'Trigger':
@@ -129,7 +135,7 @@ class HaptiqueMacro extends IPSModule
         $this->PublishMQTT($topic, $payload, 0, false);
     }
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $payloadString = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
 
@@ -153,10 +159,11 @@ class HaptiqueMacro extends IPSModule
 
         $this->SendDebug('Topic', $topic, 0);
         $this->SendDebug('Payload', $payload, 0);
+        return '';
     }
 
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $form = [
             'elements' => [

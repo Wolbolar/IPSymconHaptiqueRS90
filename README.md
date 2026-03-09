@@ -1,30 +1,12 @@
-# Cantata Haptique RS90x
+Haptique RS90 Integration for IP-Symcon
+===
+[![Version](https://img.shields.io/badge/Symcon-PHPModule-red.svg)](https://www.symcon.de/service/dokumentation/entwicklerbereich/sdk-tools/sdk-php/)
+[![Version](https://img.shields.io/badge/Symcon%20Version-%3E%209.0-green.svg)](https://www.symcon.de/service/dokumentation/installation/migration-v40-v41/)
 
-Folgende Module beinhaltet das Cantata Haptique RS90x Repository:
+Modul für IP-Symcon ab Version 9. Ermöglicht die Integration der Cantata Haptique RS90 in IP-Symcon.
 
-- __Haptique Splitter__ ([Dokumentation](Haptique%20Splitter))  
-	Kurze Beschreibung des Moduls.
+- 🇩🇪 [Deutsche Dokumentation](docs/de/README.md "Deutsche Dokumentation")
 
-- __Haptique Configurator__ ([Dokumentation](Haptique%20Configurator))  
-	Kurze Beschreibung des Moduls.
+Module for IP-Symcon version 9 or higher. Enables integration of the Cantata Haptique RS90 into IP-Symcon.
 
-- __Haptique Scene__ ([Dokumentation](Haptique%20Scene))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique Remote__ ([Dokumentation](Haptique%20Remote))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique IR Device__ ([Dokumentation](Haptique%20IR%20Device))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique Extender__ ([Dokumentation](Haptique%20Extender))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique Hub__ ([Dokumentation](Haptique%20Hub))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique Hub Splitter__ ([Dokumentation](Haptique%20Hub%20Splitter))  
-	Kurze Beschreibung des Moduls.
-
-- __Haptique Extender Splitter__ ([Dokumentation](Haptique%20Extender%20Splitter))  
-	Kurze Beschreibung des Moduls.
+- 🇬🇧 [English Documentation](docs/en/README.md "English documentation")

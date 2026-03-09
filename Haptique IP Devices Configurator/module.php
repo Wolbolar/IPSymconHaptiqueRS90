@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-class HaptiqueIPDevicesConfigurator extends IPSModule
+class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
 {
-    public function Create()
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
@@ -16,16 +16,19 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
 
     }
 
-    public function Destroy()
+    public function Destroy(): void
     {
         //Never delete this line!
         parent::Destroy();
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
+
+        // Standardmäßig nach ApplyChanges aktiv setzen
+        $this->SetStatus(IS_ACTIVE);
 
         // Sync Kincony Wizard selection with RS90 Custom URL devices after the user clicked "Änderungen übernehmen".
         try {
@@ -33,6 +36,9 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
         } catch (Throwable $e) {
             $this->SendDebug(__FUNCTION__, 'SyncKinconyWizardSelectionToRs90 exception: ' . $e->getMessage(), 0);
             $this->SendDebug(__FUNCTION__, $e->getTraceAsString(), 0);
+
+            // optional: Fehlerstatus setzen
+            $this->SetStatus(IS_EBASE + 1);
         }
     }
 
@@ -1008,6 +1014,34 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
     }
 
     /**
+     * Returns the prefilled Symcon Connect Cantata webhook URL if Symcon Connect is available.
+     * Returns empty string if no usable Connect URL exists.
+     */
+    private function GetPrefillSymconConnectCantataURL(): string
+    {
+        $connectUrl = $this->GetConnectURL();
+        if ($connectUrl === '') {
+            return '';
+        }
+
+        $connectUrl = trim($connectUrl);
+        if ($connectUrl === '') {
+            return '';
+        }
+
+        // Only accept proper HTTPS Connect URLs
+        if (strpos($connectUrl, 'https://') !== 0) {
+            $this->SendDebug(__FUNCTION__, 'Connect URL does not start with https:// : ' . $connectUrl, 0);
+            return '';
+        }
+
+        // Normalize: ensure no trailing slash
+        $connectUrl = rtrim($connectUrl, '/');
+
+        return $connectUrl . '/hook/cantata?command=';
+    }
+
+    /**
      * Ermittelt eine sinnvolle lokale Host-IP von IP-Symcon (nicht die Console-Client-IP).
      */
     private function GetHostIP(): string
@@ -1072,17 +1106,11 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
     {
         $this->SendDebug(__FUNCTION__, 'Detecting Symcon Connect URL', 0);
 
-        $connectUrl = $this->GetConnectURL();
-        if ($connectUrl === '') {
+        $url = $this->GetPrefillSymconConnectCantataURL();
+        if ($url === '') {
             $this->SendDebug(__FUNCTION__, 'Connect URL not available', 0);
             return;
         }
-
-        // Normalize: ensure no trailing slash
-        $connectUrl = rtrim($connectUrl, '/');
-
-        // Connect URL points to the web front. We want the hook endpoint.
-        $url = $connectUrl . '/hook/cantata?command=';
 
         $this->SendDebug(__FUNCTION__, 'Prefill Connect URL: ' . $url, 0);
         $this->UpsertTemplateVariable('SymconConnectCantata', $url);
@@ -1302,6 +1330,59 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
         }
 
         $this->SendDebug(__FUNCTION__, "Template variable '{$displayName}' prepared (pending apply): '{$value}'", 0);
+    }
+
+    /**
+     * Returns the TemplateVariables list for the form, enriched with predefined rows.
+     * Existing property values win. Optional values are only added when available.
+     */
+    private function BuildTemplateVariablesListValues(): array
+    {
+        $raw = json_decode($this->ReadPropertyString('TemplateVariables'), true);
+        if (!is_array($raw)) {
+            $raw = [];
+        }
+
+        $rowsByKey = [];
+
+        foreach ($raw as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $rawName = isset($row['Name']) ? trim((string)$row['Name']) : '';
+            if ($rawName === '') {
+                continue;
+            }
+
+            $key = $rawName;
+            if (preg_match('/^\{\{([A-Za-z0-9_\-\.]+)\}\}$/', $rawName, $m)) {
+                $key = $m[1];
+            }
+
+            if (!preg_match('/^[A-Za-z0-9_\-\.]+$/', $key)) {
+                continue;
+            }
+
+            $rowsByKey[$key] = [
+                'Name'  => '{{' . $key . '}}',
+                'Value' => isset($row['Value']) ? (string)$row['Value'] : ''
+            ];
+        }
+
+        // Optional predefined variable: only add if Symcon Connect URL is really available.
+        $connectCantataUrl = $this->GetPrefillSymconConnectCantataURL();
+        if ($connectCantataUrl !== '' && !isset($rowsByKey['SymconConnectCantata'])) {
+            $rowsByKey['SymconConnectCantata'] = [
+                'Name'  => '{{SymconConnectCantata}}',
+                'Value' => $connectCantataUrl
+            ];
+        }
+
+        // Stable ordering for UI
+        ksort($rowsByKey, SORT_NATURAL | SORT_FLAG_CASE);
+
+        return array_values($rowsByKey);
     }
 
     public function UpdateVariableID($ID, $value_name)
@@ -1640,7 +1721,7 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
 
 
 
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         $this->SendDebug(__FUNCTION__, 'Konfigurator-Formular wird geladen', 0);
 
@@ -1667,6 +1748,7 @@ class HaptiqueIPDevicesConfigurator extends IPSModule
         // If we have no pending changes, always fetch fresh values from RS90
         $devicesTreeValues = $useStoredValues ? [] : $this->BuildDevicesCommandsTreeValues();
         $kinconyWizardValues = $this->BuildKinconyWizardListValues($useStoredValues);
+        $templateVariablesValues = $this->BuildTemplateVariablesListValues();
 
         $this->SendDebug(__FUNCTION__, 'Tree source=' . ($useStoredValues ? 'configuration(property)' : 'RS90 via splitter'), 0);
 
@@ -1916,7 +1998,8 @@ PHP,
                                         'type' => 'ValidationTextBox'
                                     ]
                                 ]
-                            ]
+                            ],
+                            'values' => $templateVariablesValues
                         ],
                         [
                             'type'  => 'RowLayout',
@@ -2066,7 +2149,7 @@ PHP,
                 ]
             ],
             'status' => [
-                ['code' => IS_CREATING, 'icon' => 'gear', 'caption' => $this->Translate('Device is being created')],
+                ['code' => IS_CREATING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being created')],
                 ['code' => IS_ACTIVE, 'icon' => 'active', 'caption' => $this->Translate('Device connected and active')],
                 ['code' => IS_DELETING, 'icon' => 'inactive', 'caption' => $this->Translate('Device is being deleted')],
                 ['code' => IS_INACTIVE, 'icon' => 'inactive', 'caption' => $this->Translate('Device inactive')],

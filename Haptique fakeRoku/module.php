@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 include_once __DIR__ . '/../libs/SSDPTraits.php';
 
-class HaptiqueRokuEmulator extends IPSModule
+class HaptiqueRokuEmulator extends IPSModuleStrict
 {
     // helper properties
     private $position = 0;
 
     private $MySerial = '';
 
-    public function Create()
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'require',
+            'moduleIDs' => ['{8062CF2B-600E-41D6-AD4B-1BA66C32D6ED}'] // Server Socket
+        ]);
+    }
+    public function Create(): void
     {
         //Never delete this line!
         parent::Create();
-        $this->RequireParent('{8062CF2B-600E-41D6-AD4B-1BA66C32D6ED}'); // Server Socket
+
         $this->RegisterPropertyInteger('ServerSocketPort', 8060);
 
         $this->MySerial = md5(openssl_random_pseudo_bytes(10));
@@ -24,7 +31,7 @@ class HaptiqueRokuEmulator extends IPSModule
         $this->RegisterMessage(0, IPS_KERNELMESSAGE);
     }
 
-    public function ApplyChanges()
+    public function ApplyChanges(): void
     {
         //Never delete this line!
         parent::ApplyChanges();
@@ -48,18 +55,19 @@ class HaptiqueRokuEmulator extends IPSModule
 
         $this->RegisterVariableInteger('KeyFakeRoku', 'Roku Emulator', 'Haptique.FakeRokuIPS', $this->_getPosition());
         $this->EnableAction('KeyFakeRoku');
-        $LastKeystrokeFakeRokuID = $this->RegisterVariableString('LastKeystrokeFakeRoku', 'Letzter Tastendruck', '', $this->_getPosition());
+        $this->RegisterVariableString('LastKeystrokeFakeRoku', 'Letzter Tastendruck', '', $this->_getPosition());
+        $LastKeystrokeFakeRokuID = $this->GetIDForIdent('LastKeystrokeFakeRoku');
         IPS_SetIcon($LastKeystrokeFakeRokuID, 'Keyboard');
         $this->ValidateConfiguration();
     }
 
-    public function GetConfigurationForParent()
+    public function GetConfigurationForParent(): string
     {
         $Config['Port'] = $this->ReadPropertyInteger('ServerSocketPort'); // Server Socket Port
         return json_encode($Config);
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
         $this->LogMessage('SenderID: ' . $SenderID . ', Message: ' . $Message . ', Data:' . json_encode($Data), KL_DEBUG);
         if ($Message == IPS_KERNELMESSAGE) {
@@ -82,7 +90,7 @@ class HaptiqueRokuEmulator extends IPSModule
         Home/Menu Buttons: keypress/back, keypress/home, keypress/info, etc.
      */
 
-    public function ReceiveData($JSONString)
+    public function ReceiveData($JSONString): string
     {
         $data = json_decode($JSONString);
         $buffer = $data->Buffer;
@@ -95,7 +103,7 @@ class HaptiqueRokuEmulator extends IPSModule
         // Prüfe, ob erste Zeile vorhanden und nicht leer ist
         if (!isset($lines[0]) || trim($lines[0]) === '') {
             $this->SendDebug('ReceiveData', 'Leere Request-Zeile', 0);
-            return;
+            return '';
         }
         $requestLine = $lines[0]; // z.B. "GET /query/device-info HTTP/1.1"
         $parts = explode(' ', $requestLine);
@@ -103,7 +111,7 @@ class HaptiqueRokuEmulator extends IPSModule
         // HTTP-Request muss mindestens Methode, Pfad und Protokoll enthalten
         if (count($parts) < 3 || !isset($parts[0]) || !isset($parts[1]) || !isset($parts[2])) {
             $this->SendDebug('ReceiveData', 'Ungültige HTTP-Anfrage', 0);
-            return;
+            return '';
         }
 
         $method = strtoupper($parts[0]);
@@ -115,16 +123,16 @@ class HaptiqueRokuEmulator extends IPSModule
             switch ($path) {
                 case '/query/device-info':
                     $this->RokuResponse($Host, $Port);
-                    return;
+                    return '';
                 case '/query/apps':
                     $this->SendToSocket($Host, $Port, "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                    return;
+                    return '';
                 case '/':
                     $this->RokuResponse($Host, $Port);
-                    return;
+                    return '';
                 default:
                     $this->SendDebug('ReceiveData', 'Unbekannter GET-Pfad: ' . $path, 0);
-                    return;
+                    return '';
             }
         } elseif ($method === 'POST') {
             if (preg_match('#^/keypress/([^ ]+)#', $path, $matches)) {
@@ -140,9 +148,10 @@ class HaptiqueRokuEmulator extends IPSModule
         } else {
             $this->SendDebug('ReceiveData', 'Unbekannte Methode: ' . $method, 0);
         }
+        return '';
     }
 
-    public function RequestAction($Ident, $Value)
+    public function RequestAction($Ident, $Value): void
     {
         $ObjID = $this->GetIDForIdent($Ident);
         // $lastkeyid = $this->GetIDForIdent("LastKeystrokeFakeRoku");
@@ -168,7 +177,7 @@ class HaptiqueRokuEmulator extends IPSModule
      *
      * @return string
      */
-    public function GetConfigurationForm()
+    public function GetConfigurationForm(): string
     {
         // update status, when configuration is not complete
         if (!$this->CheckConfiguration()) {
@@ -600,24 +609,6 @@ class HaptiqueRokuEmulator extends IPSModule
         return $form;
     }
 
-    /*
-     * Migrations
-     */
-
-    /**
-     * Polyfill for IP-Symcon 4.4 and older.
-     *
-     * @param $Ident
-     * @param $Value
-     */
-    protected function SetValue($Ident, $Value)
-    {
-        if (IPS_GetKernelVersion() >= 5) {
-            parent::SetValue($Ident, $Value);
-        } elseif ($id = @$this->GetIDForIdent($Ident)) {
-            SetValue($id, $Value);
-        }
-    }
 
     /**
      * Die folgenden Funktionen stehen automatisch zur Verfügung, wenn das Modul über die "Module Control" eingefügt wurden.
