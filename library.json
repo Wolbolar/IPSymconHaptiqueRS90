@@ -1,12 +1,12 @@
 {
     "id": "{D23D9DB9-C4C1-54E2-3D56-AD6E3A48938B}",
-    "name": "Cantata Haptique RS90x",
+    "name": "Cantata Haptique RS90",
     "author": "Fonzo",
     "url": "https://www.cantatacs.com/haptique-rs90x",
     "compatibility": {
-        "version": "7.1"
+        "version": "9.0"
     },
     "version": "1.0",
-    "build": 0,
-    "date": 0
+    "build": 1,
+    "date": 20260309
 }

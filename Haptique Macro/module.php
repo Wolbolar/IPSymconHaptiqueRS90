@@ -135,30 +135,80 @@ class HaptiqueMacro extends IPSModuleStrict
         $this->PublishMQTT($topic, $payload, 0, false);
     }
 
-    public function ReceiveData($JSONString): string
+    public function ReceiveData(string $JSONString): string
     {
-        $payloadString = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
+        $this->SendDebug('Incoming', $JSONString, 0);
 
-        $this->SendDebug('Incoming', $payloadString, 0);
-
-        $data = json_decode($payloadString, true);
+        $data = json_decode($JSONString, true);
         if (!is_array($data)) {
-            $this->SendDebug('ReceiveData', 'json_decode failed', 0);
+            $this->SendDebug(__FUNCTION__, 'Invalid JSONString received', 0);
             return '';
         }
 
-        $topic   = $data['Topic']   ?? '';
+        $topic = $data['Topic'] ?? '';
         $payload = $data['Payload'] ?? '';
 
         if (!is_string($topic) || $topic === '') {
+            $this->SendDebug(__FUNCTION__, 'Missing or invalid Topic', 0);
             return '';
         }
+
         if (!is_string($payload)) {
             $payload = (string) $payload;
         }
 
         $this->SendDebug('Topic', $topic, 0);
-        $this->SendDebug('Payload', $payload, 0);
+        $this->SendDebug('PayloadRaw', $payload, 0);
+
+        // Symcon MQTT payloads often arrive as hex-encoded strings.
+        // Decode them when possible so text/JSON payloads can be processed normally.
+        $decodedPayload = $payload;
+        if ($decodedPayload !== '' && ctype_xdigit($decodedPayload) && (strlen($decodedPayload) % 2 === 0)) {
+            $binPayload = hex2bin($decodedPayload);
+            if ($binPayload !== false) {
+                $decodedPayload = $binPayload;
+                $this->SendDebug('PayloadHexDecoded', $decodedPayload, 0);
+            }
+        }
+
+        $remoteId = trim($this->ReadPropertyString('RemoteID'));
+        $macroName = $this->ReadPropertyString('MacroName');
+        $macroId = $this->ReadPropertyString('MacroID');
+
+        if ($remoteId === '') {
+            $this->SendDebug(__FUNCTION__, 'RemoteID missing', 0);
+            return '';
+        }
+
+        $baseTopicByName = $macroName !== '' ? 'Haptique/' . $remoteId . '/macro/' . $macroName : '';
+        $baseTopicById = $macroId !== '' ? 'Haptique/' . $remoteId . '/macro/' . $macroId : '';
+
+        $detailTopics = array_filter([
+            $baseTopicByName !== '' ? $baseTopicByName . '/detail' : '',
+            $baseTopicById !== '' ? $baseTopicById . '/detail' : ''
+        ]);
+
+        $triggerTopics = array_filter([
+            $baseTopicByName !== '' ? $baseTopicByName . '/trigger' : '',
+            $baseTopicById !== '' ? $baseTopicById . '/trigger' : ''
+        ]);
+
+        if (in_array($topic, $detailTopics, true)) {
+            $this->SendDebug(__FUNCTION__, 'Macro detail received: ' . $decodedPayload, 0);
+            return '';
+        }
+
+        if (in_array($topic, $triggerTopics, true)) {
+            $normalized = strtolower(trim($decodedPayload));
+            if (in_array($normalized, ['on', 'true', '1'], true)) {
+                $this->SetValue('Trigger', true);
+            } elseif (in_array($normalized, ['off', 'false', '0'], true)) {
+                $this->SetValue('Trigger', false);
+            }
+            $this->SendDebug(__FUNCTION__, 'Macro trigger state received: ' . $decodedPayload, 0);
+            return '';
+        }
+
         return '';
     }
 

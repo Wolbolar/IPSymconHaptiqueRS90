@@ -48,39 +48,55 @@ class HaptiqueScene extends IPSModuleStrict
         $this->SendDataToParent(json_encode(['DataID' => '{A04B56D8-C2A2-B7BB-11F1-523502DE2933}']));
     }
 
-    public function ReceiveData($JSONString): string
+    public function ReceiveData(string $JSONString): string
     {
-        $this->SendDebug(__FUNCTION__, $JSONString, 0);
+        $this->SendDebug(__FUNCTION__, 'Raw JSON: ' . $JSONString, 0);
+
         $data = json_decode($JSONString, true);
-
-        if (isset($data['SceneID']) && isset($data['Button'])) {
-            $sceneID = $data['SceneID'];
-            $buttonIndex = $data['Button']; // Button als Nummer (1, 2, 3)
-            $this->SendDebug('ReceiveData', "Eingehende Daten: SceneID=$sceneID, ButtonIndex=$buttonIndex", 0);
-
-            // Prüfen, ob die SceneID zu dieser Instanz passt
-            if ($sceneID === $this->ReadPropertyInteger('SceneID')) {
-                // Button-Namen aus der Property ermitteln
-                $buttonConfig = json_decode($this->ReadPropertyString('ButtonConfig'), true);
-
-                if (isset($buttonConfig[$buttonIndex - 1])) {
-                    // Button-Namen aus der Property verwenden
-                    $buttonName = $buttonConfig[$buttonIndex - 1]['Name'] ?? '';
-                    $this->SendDebug('ReceiveData', "Button-Name gefunden: $buttonName", 0);
-
-                    if (!empty($buttonName)) {
-                        // Button-Befehl ausführen
-                        $this->SendButtonCommand($buttonName);
-                    } else {
-                        $this->SendDebug('ReceiveData', "Kein Button-Name für Index $buttonIndex gefunden.", 0);
-                    }
-                } else {
-                    $this->SendDebug('ReceiveData', "Ungültiger Button-Index: $buttonIndex", 0);
-                }
-            } else {
-                $this->SendDebug('ReceiveData', "SceneID stimmt nicht überein: $sceneID", 0);
-            }
+        if (!is_array($data)) {
+            $this->SendDebug(__FUNCTION__, 'JSON decode failed: ' . json_last_error_msg(), 0);
+            return '';
         }
+
+        if (!isset($data['SceneID']) || !isset($data['Button'])) {
+            $this->SendDebug(__FUNCTION__, 'Missing SceneID or Button in payload', 0);
+            return '';
+        }
+
+        $sceneID = (int)$data['SceneID'];
+        $buttonIndex = (int)$data['Button'];
+
+        $this->SendDebug('ReceiveData', "Incoming: SceneID=$sceneID ButtonIndex=$buttonIndex", 0);
+
+        if ($sceneID !== $this->ReadPropertyInteger('SceneID')) {
+            $this->SendDebug('ReceiveData', "SceneID mismatch: $sceneID", 0);
+            return '';
+        }
+
+        $buttonConfig = json_decode($this->ReadPropertyString('ButtonConfig'), true);
+        if (!is_array($buttonConfig)) {
+            $this->SendDebug('ReceiveData', "ButtonConfig invalid", 0);
+            return '';
+        }
+
+        $index = $buttonIndex - 1;
+
+        if (!isset($buttonConfig[$index])) {
+            $this->SendDebug('ReceiveData', "Invalid ButtonIndex: $buttonIndex", 0);
+            return '';
+        }
+
+        $buttonName = $buttonConfig[$index]['Name'] ?? '';
+
+        if ($buttonName === '') {
+            $this->SendDebug('ReceiveData', "Button name empty for index $buttonIndex", 0);
+            return '';
+        }
+
+        $this->SendDebug('ReceiveData', "Resolved Button: $buttonName", 0);
+
+        $this->SendButtonCommand($buttonName);
+
         return '';
     }
 

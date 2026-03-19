@@ -163,6 +163,10 @@ class HaptiqueDevice extends IPSModuleStrict
         ];
 
         $this->SendDebug(__FUNCTION__, json_encode($packet, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0);
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug('MQTT', 'Skip send - no active parent', 0);
+            return;
+        }
         $this->SendDataToParent(json_encode($packet));
     }
 
@@ -179,68 +183,91 @@ class HaptiqueDevice extends IPSModuleStrict
         ];
 
         $this->SendDebug('PublishMQTT', json_encode($packet, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0);
+
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug('MQTT', 'Skip publish - no active parent', 0);
+            return;
+        }
+
         $this->SendDataToParent(json_encode($packet));
     }
 
     // ---------- Receiving ----------
 
-    public function ReceiveData($JSONString): string
+    public function ReceiveData(string $JSONString): string
     {
-        // Falls du weiterhin Encoding-Probleme hast, kannst du hier wie im Configurator konvertieren
-        $payload_string = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
-
-        $data = json_decode($payload_string, true);
+        $data = json_decode($JSONString, true);
         if (!is_array($data)) {
+            $this->SendDebug(__FUNCTION__, 'Invalid JSONString received', 0);
             return '';
         }
 
-        $topic   = $data['Topic'] ?? '';
+        $topic = $data['Topic'] ?? '';
         $payload = $data['Payload'] ?? '';
 
         if (!is_string($topic) || $topic === '') {
+            $this->SendDebug(__FUNCTION__, 'Missing or invalid Topic', 0);
             return '';
         }
 
-        $this->SendDebug(__FUNCTION__, 'Topic: ' . $topic, 0);
-        $this->SendDebug(__FUNCTION__, 'Payload: ' . (string) $payload, 0);
+        if (!is_string($payload)) {
+            $payload = (string) $payload;
+        }
 
-        $remoteId   = $this->ReadPropertyString('RemoteID');
+        $this->SendDebug(__FUNCTION__, 'Topic: ' . $topic, 0);
+        $this->SendDebug(__FUNCTION__, 'PayloadRaw: ' . $payload, 0);
+
+        // Symcon MQTT payloads often arrive as hex-encoded strings.
+        // Decode them when possible so JSON/text payloads can be processed normally.
+        $decodedPayload = $payload;
+        if ($decodedPayload !== '' && ctype_xdigit($decodedPayload) && (strlen($decodedPayload) % 2 === 0)) {
+            $binPayload = hex2bin($decodedPayload);
+            if ($binPayload !== false) {
+                $decodedPayload = $binPayload;
+                $this->SendDebug(__FUNCTION__, 'PayloadHexDecoded: ' . $decodedPayload, 0);
+            }
+        }
+
+        $remoteId = trim($this->ReadPropertyString('RemoteID'));
         $deviceName = $this->ReadPropertyString('DeviceName');
 
-        $baseTopic     = 'Haptique/' . $remoteId . '/device/' . $deviceName;
-        $detailTopic   = $baseTopic . '/detail';
+        if ($remoteId === '' || $deviceName === '') {
+            $this->SendDebug(__FUNCTION__, 'RemoteID or DeviceName missing', 0);
+            return '';
+        }
+
+        $baseTopic = 'Haptique/' . $remoteId . '/device/' . $deviceName;
+        $detailTopic = $baseTopic . '/detail';
         $commandsTopic = $baseTopic . '/commands';
 
-        // Erwartete Topics: /detail ODER /commands
+        // Expected topics: /detail or /commands
         if ($topic === $detailTopic || $topic === $commandsTopic) {
-            $arr = json_decode((string) $payload, true);
-            if (is_array($arr)) {
-                // Persist + build variable profile
-                $this->WriteAttributeString('Commands', json_encode($arr));
-                $this->BuildCommandProfile($arr);
-
-
-                // Build rows for the configuration-form list
-                $rows = [];
-                foreach ($arr as $cmd) {
-                    if (!is_array($cmd)) {
-                        continue;
-                    }
-                    $rows[] = [
-                        'CommandName' => (string)($cmd['name'] ?? $cmd['Name'] ?? ''),
-                        'CommandID'   => (string)($cmd['id'] ?? $cmd['Id'] ?? '')
-                    ];
-                }
-
-                // Live update of the open instance configuration form
-                // Note: complex params (lists/objects) must be JSON encoded.
-                // If no instance configuration is open, this will simply do nothing.
-                $this->UpdateFormField('Commands', 'values', json_encode($rows));
-
-                $this->SendDebug(__FUNCTION__, 'Commands received from ' . $topic . ' (' . count($arr) . ')', 0);
-            } else {
-                $this->SendDebug(__FUNCTION__, 'Commands payload is not JSON array', 0);
+            $arr = json_decode($decodedPayload, true);
+            if (!is_array($arr)) {
+                $this->SendDebug(__FUNCTION__, 'Commands payload is not a JSON array after decode', 0);
+                return '';
             }
+
+            // Persist + build variable profile
+            $this->WriteAttributeString('Commands', json_encode($arr));
+            $this->BuildCommandProfile($arr);
+
+            // Build rows for the configuration-form list
+            $rows = [];
+            foreach ($arr as $cmd) {
+                if (!is_array($cmd)) {
+                    continue;
+                }
+                $rows[] = [
+                    'CommandName' => (string) ($cmd['name'] ?? $cmd['Name'] ?? ''),
+                    'CommandID'   => (string) ($cmd['id'] ?? $cmd['Id'] ?? '')
+                ];
+            }
+
+            // Live update of the open instance configuration form
+            $this->UpdateFormField('Commands', 'values', json_encode($rows));
+
+            $this->SendDebug(__FUNCTION__, 'Commands received from ' . $topic . ' (' . count($arr) . ')', 0);
             return '';
         }
 

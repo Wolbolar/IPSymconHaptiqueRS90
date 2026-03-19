@@ -462,14 +462,19 @@ class HaptiqueRokuEmulator extends IPSModuleStrict
         foreach ($harmonyhubs as $harmonyhub) {
             $activities = $this->GetHubActivities($harmonyhub);
             foreach ($activities as $key => $activity) {
-                $this->RegisterPropertyString('rokukeys_' . $harmonyhub . '_' . abs($activity), '[]');
+                $activityId = is_numeric($activity) ? (int) $activity : 0;
+                if ($activityId === 0) {
+                    continue;
+                }
+                $this->RegisterPropertyString('rokukeys_' . $harmonyhub . '_' . abs($activityId), '[]');
             }
         }
     }
 
     protected function GetListName($HarmonyHubObjID, $HarmonyHubActivity)
     {
-        $name = 'rokukeys_' . $HarmonyHubObjID . '_' . abs($HarmonyHubActivity);
+        $activityId = is_numeric($HarmonyHubActivity) ? (int) $HarmonyHubActivity : 0;
+        $name = 'rokukeys_' . $HarmonyHubObjID . '_' . abs($activityId);
 
         return $name;
     }

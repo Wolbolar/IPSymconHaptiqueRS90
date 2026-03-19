@@ -466,55 +466,82 @@ class HaptiqueDeviceConfigurator extends IPSModuleStrict
         return $macroRows;
     }
 
-    public function ReceiveData($JSONString): string
+    public function ReceiveData(string $JSONString): string
     {
-        $payload_string = mb_convert_encoding($JSONString, 'ISO-8859-1', 'UTF-8');
+        $this->SendDebug('Incoming', $JSONString, 0);
 
-        $this->SendDebug('Incoming', $payload_string, 0);
+        $data = json_decode($JSONString, true);
+        if (!is_array($data)) {
+            $this->SendDebug(__FUNCTION__, 'Invalid JSONString received', 0);
+            return '';
+        }
 
-        $data = json_decode($payload_string, true);
-        if (!is_array($data)) return '';
-
-        $topic   = $data['Topic']   ?? '';
+        $topic = $data['Topic'] ?? '';
         $payload = $data['Payload'] ?? '';
 
-        if (!is_string($topic) || !is_string($payload) || $topic === '') return '';
+        if (!is_string($topic) || $topic === '') {
+            $this->SendDebug(__FUNCTION__, 'Missing or invalid Topic', 0);
+            return '';
+        }
+
+        if (!is_string($payload)) {
+            $payload = (string) $payload;
+        }
 
         $this->SendDebug('Topic', $topic, 0);
-        $this->SendDebug('Payload', $payload, 0);
+        $this->SendDebug('PayloadRaw', $payload, 0);
+
+        // Symcon MQTT payloads often arrive as hex-encoded strings.
+        // Decode them when possible so text/JSON payloads can be processed normally.
+        $decodedPayload = $payload;
+        if ($decodedPayload !== '' && ctype_xdigit($decodedPayload) && (strlen($decodedPayload) % 2 === 0)) {
+            $binPayload = hex2bin($decodedPayload);
+            if ($binPayload !== false) {
+                $decodedPayload = $binPayload;
+                $this->SendDebug('PayloadHexDecoded', $decodedPayload, 0);
+            }
+        }
 
         // RemoteID aus Topic ziehen: Haptique/{RemoteID}/...
         $parts = explode('/', $topic);
-        $remoteId = $parts[1] ?? '';
+        $remoteId = (string) ($parts[1] ?? '');
         $this->EnsureRemoteId($remoteId);
 
         // keys: Haptique/{RemoteID}/keys  payload like "button:10"
         if (($parts[2] ?? '') === 'keys') {
-            $this->SetMapValue('LastKeyByRemote', $remoteId, $payload);
+            $this->SetMapValue('LastKeyByRemote', $remoteId, $decodedPayload);
             return '';
         }
 
         // battery/status: Haptique/{RemoteID}/battery/status
         if (($parts[2] ?? '') === 'battery' && ($parts[3] ?? '') === 'status') {
-            $lvl = (int)preg_replace('/[^0-9]/', '', $payload);
+            $lvl = (int) preg_replace('/[^0-9]/', '', $decodedPayload);
             $this->SetMapValue('BatteryByRemote', $remoteId, $lvl);
             return '';
         }
 
         // device/list (JSON Array): Haptique/{RemoteID}/device/list
         if (($parts[2] ?? '') === 'device' && ($parts[3] ?? '') === 'list') {
-            $j = json_decode($payload, true);
+            $j = json_decode($decodedPayload, true);
             if (is_array($j)) {
                 $this->SetMapValue('DeviceListsByRemote', $remoteId, $j);
+                $this->UpdateFormField('DevicesTree', 'values', json_encode($this->LoadDevices()));
+                $this->SendDebug(__FUNCTION__, 'Updated device list for remote ' . $remoteId . ' (' . count($j) . ')', 0);
+            } else {
+                $this->SendDebug(__FUNCTION__, 'Device list payload is not valid JSON after decode', 0);
             }
             return '';
         }
 
         // macro/list (JSON Array): Haptique/{RemoteID}/macro/list
         if (($parts[2] ?? '') === 'macro' && ($parts[3] ?? '') === 'list') {
-            $j = json_decode($payload, true);
+            $j = json_decode($decodedPayload, true);
             if (is_array($j)) {
                 $this->SetMapValue('MacroListsByRemote', $remoteId, $j);
+                $this->UpdateFormField('MacroTree', 'values', json_encode($this->LoadMacros()));
+                $this->SendDebug(__FUNCTION__, 'Updated macro list for remote ' . $remoteId . ' (' . count($j) . ')', 0);
+            } else {
+                $this->SendDebug(__FUNCTION__, 'Macro list payload is not valid JSON after decode', 0);
             }
             return '';
         }

@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
 {
+    public function GetCompatibleParents(): string
+    {
+        return json_encode([
+            'type' => 'connect',
+            'moduleIDs' => ['{D5CC2243-C3B3-4C0D-1E07-81701A5FE120}'] // Parent: Haptique Splitter
+        ]);
+    }
     public function Create(): void
     {
         //Never delete this line!
         parent::Create();
+
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
 
         $this->RegisterAttributeString('Token', "");
         $this->RegisterPropertyString('IPDevicesTree', '[]');
@@ -27,8 +36,43 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         //Never delete this line!
         parent::ApplyChanges();
 
+        if (IPS_GetKernelRunlevel() === KR_READY) {
+            $this->RunDeferredInitialization();
+        }
+
         // Standardmäßig nach ApplyChanges aktiv setzen
         $this->SetStatus(IS_ACTIVE);
+    }
+
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    {
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
+
+        if (($SenderID !== 0) || ($Message !== IPS_KERNELSTARTED)) {
+            return;
+        }
+
+        $this->SendDebug(__FUNCTION__, 'IPS_KERNELSTARTED received - running deferred initialization', 0);
+        $this->RunDeferredInitialization();
+
+        // We only need this once after the kernel startup.
+        $this->UnregisterMessage(0, IPS_KERNELSTARTED);
+    }
+
+    private function RunDeferredInitialization(): void
+    {
+        if (IPS_GetKernelRunlevel() !== KR_READY) {
+            $this->SendDebug(__FUNCTION__, 'Kernel not ready yet - deferred initialization skipped', 0);
+            return;
+        }
+
+        $instance = @IPS_GetInstance($this->InstanceID);
+        $parentId = is_array($instance) && isset($instance['ConnectionID']) ? (int) $instance['ConnectionID'] : 0;
+
+        if ($parentId <= 0 || !IPS_InstanceExists($parentId)) {
+            $this->SendDebug(__FUNCTION__, 'No connected splitter available yet - deferred initialization skipped', 0);
+            return;
+        }
 
         // Sync Kincony Wizard selection with RS90 Custom URL devices after the user clicked "Änderungen übernehmen".
         try {
@@ -51,6 +95,11 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         ];
 
         $this->SendDebug(__FUNCTION__ . ' Request', json_encode($request), 0);
+
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skip send - no active parent', 0);
+            return null;
+        }
 
         $response = $this->SendDataToParent(json_encode($request));
         if (!is_string($response) || $response === '') {
@@ -1586,19 +1635,19 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
 
             // 4) Read commands from the correct property
             $propName = ($deviceType === 'RF') ? 'rfCommands' : 'commands';
-            $commandsJson = '';
+            $commandsPayload = '';
             try {
-                $commandsJson = (string)IPS_GetProperty($instanceId, $propName);
+                $commandsPayload = (string)IPS_GetProperty($instanceId, $propName);
             } catch (Throwable $e) {
                 $this->SendDebug(__FUNCTION__, "IPS_GetProperty({$propName}) threw for InstanceID={$instanceId}: " . $e->getMessage(), 0);
-                $commandsJson = '';
+                $commandsPayload = '';
             }
 
-            $this->SendDebug(__FUNCTION__, "InstanceID={$instanceId} Name={$name} Type={$deviceType} Prop={$propName} CommandsLen=" . strlen($commandsJson), 0);
+            $this->SendDebug(__FUNCTION__, "InstanceID={$instanceId} Name={$name} Type={$deviceType} Prop={$propName} CommandsLen=" . strlen($commandsPayload), 0);
 
             $commandsArr = [];
-            if (trim($commandsJson) !== '') {
-                $decoded = json_decode($commandsJson, true);
+            if (trim($commandsPayload) !== '') {
+                $decoded = json_decode($commandsPayload, true);
                 if (is_array($decoded)) {
                     $commandsArr = $decoded;
                 } else {
@@ -1662,7 +1711,7 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
             if (empty($commands)) {
                 $this->SendDebug(__FUNCTION__, "No commands found for InstanceID={$instanceId} (deviceType={$deviceType})", 0);
                 // Helpful extra debug: show first chars of the raw JSON so we see the format immediately
-                $this->SendDebug(__FUNCTION__, 'CommandsRawHead=' . substr($commandsJson, 0, 200), 0);
+                $this->SendDebug(__FUNCTION__, 'CommandsRawHead=' . substr($commandsPayload, 0, 200), 0);
                 continue;
             }
 
