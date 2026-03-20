@@ -22,6 +22,10 @@ class HaptiqueScene extends IPSModuleStrict
         $this->RegisterPropertyInteger("SceneID", 0);
         $this->RegisterPropertyString('ButtonConfig', '[]'); // JSON-Initialwert
         $this->RegisterAttributeString("Buttons", '[{"Name":"Button \u2022","VariableID":0,"Value":0,"ButtonLabel":"Erster Button"},{"Name":"Button \u2022\u2022","VariableID":0,"Value":0,"ButtonLabel":"Zweiter Button"},{"Name":"Button \u2022\u2022\u2022","VariableID":0,"Value":0,"ButtonLabel":"Dritter Button"}]');
+
+        //we will wait until the kernel is ready
+        $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
     }
 
     public function Destroy(): void
@@ -41,6 +45,24 @@ class HaptiqueScene extends IPSModuleStrict
         $this->SendDebug('ApplyChanges', "Datenfilter gesetzt: $filter", 0);
 
         $this->SendDebug(__FUNCTION__, 'Buttons bei ApplyChanges: ' . $this->ReadAttributeString('Buttons'), 0);
+    }
+
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
+    {
+        //Never delete this line!
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
+
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Ready", 0);
+        }
+
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
+        }
     }
 
     public function Send()

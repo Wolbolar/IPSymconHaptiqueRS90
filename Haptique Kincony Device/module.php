@@ -151,27 +151,21 @@ declare(strict_types=1);
             return '';
         }
 
-        public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+        public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
         {
-            switch ($Message) {
-                case IPS_KERNELMESSAGE:
-                    if ($Data[0] === KR_READY) {
-                        $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
+            //Never delete this line!
+            parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
-                    }
-                    break;
+            if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+                $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
+            }
 
-                case IPS_KERNELSTARTED:
-                    $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+            if ($Message == IPS_KERNELSTARTED) {
+                $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+            }
 
-                    break;
-
-                case IM_CHANGESTATUS:
-                    if ($Data[0] === IS_ACTIVE) {
-                        $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
-
-                    }
-                    break;
+            if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+                $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
             }
         }
 

@@ -91,26 +91,24 @@ class HaptiqueDevice extends IPSModuleStrict
 
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        switch ($Message) {
-            case IM_CHANGESTATUS:
-                if ($Data[0] === IS_ACTIVE) {
-                    $this->StartGetCommands();
-                }
-                break;
+        //Never delete this line!
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
-            case IPS_KERNELMESSAGE:
-                if ($Data[0] === KR_READY) {
-                    $this->StartGetCommands();
-                }
-                break;
-            case IPS_KERNELSTARTED:
-                $this->StartGetCommands();
-                break;
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
+            $this->StartGetCommands();
+        }
 
-            default:
-                break;
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+            $this->StartGetCommands();
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
+            $this->StartGetCommands();
         }
     }
 

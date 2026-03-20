@@ -24,6 +24,10 @@ class HaptiqueDeviceConfigurator extends IPSModuleStrict
         $this->RegisterAttributeString('MacroListsByRemote', '{}');        // JSON object: { remoteId: [macros...] }
         $this->RegisterAttributeString('LastKeyByRemote', '{}');           // JSON object: { remoteId: "button:10" }
         $this->RegisterAttributeString('BatteryByRemote', '{}');           // JSON object: { remoteId: 87 }
+
+        //we will wait until the kernel is ready
+        $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
     }
 
     public function Destroy(): void
@@ -39,6 +43,24 @@ class HaptiqueDeviceConfigurator extends IPSModuleStrict
 
         // Nur Pakete mit Topic "Haptique/..." durchlassen
         $this->SetReceiveDataFilter('.*"Topic"\s*:\s*"Haptique\\/.*".*');
+    }
+
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
+    {
+        //Never delete this line!
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
+
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Ready", 0);
+        }
+
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
+        }
     }
 
     private function GetJsonAttr(string $name, $default)

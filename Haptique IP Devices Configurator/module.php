@@ -16,6 +16,8 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         //Never delete this line!
         parent::Create();
 
+        //we will wait until the kernel is ready
+        $this->RegisterMessage(0, IPS_KERNELMESSAGE);
         $this->RegisterMessage(0, IPS_KERNELSTARTED);
 
         $this->RegisterAttributeString('Token', "");
@@ -44,19 +46,23 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         $this->SetStatus(IS_ACTIVE);
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
+        //Never delete this line!
         parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
-        if (($SenderID !== 0) || ($Message !== IPS_KERNELSTARTED)) {
-            return;
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
         }
 
-        $this->SendDebug(__FUNCTION__, 'IPS_KERNELSTARTED received - running deferred initialization', 0);
-        $this->RunDeferredInitialization();
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+            $this->RunDeferredInitialization();
+        }
 
-        // We only need this once after the kernel startup.
-        $this->UnregisterMessage(0, IPS_KERNELSTARTED);
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
+        }
     }
 
     private function RunDeferredInitialization(): void

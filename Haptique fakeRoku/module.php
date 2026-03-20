@@ -29,6 +29,7 @@ class HaptiqueRokuEmulator extends IPSModuleStrict
 
         //we will wait until the kernel is ready
         $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
     }
 
     public function ApplyChanges(): void
@@ -67,13 +68,22 @@ class HaptiqueRokuEmulator extends IPSModuleStrict
         return json_encode($Config);
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        $this->LogMessage('SenderID: ' . $SenderID . ', Message: ' . $Message . ', Data:' . json_encode($Data), KL_DEBUG);
-        if ($Message == IPS_KERNELMESSAGE) {
-            if ($Data[0] === KR_READY) {
-                $this->CreateActivityProperties();
-            }
+        //Never delete this line!
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
+
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Ready", 0);
+            $this->CreateActivityProperties();
+        }
+
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug("MessageSink", "🔄 Kernel Started", 0);
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug("MessageSink", "🔄 Instanz aktiv", 0);
         }
     }
 

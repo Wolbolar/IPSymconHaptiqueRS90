@@ -91,6 +91,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         //We need to call the RegisterHook function on Kernel READY
         $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
     }
 
     /**
@@ -625,15 +626,23 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
         //Never delete this line!
         parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
         if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
-            $this->SendDebug(__FUNCTION__, '✅ Kernel READY – sende Initial-Events', 0);
+            $this->SendDebug(__FUNCTION__, '✅ Kernel READY – send Initial-Events', 0);
             $this->RegisterHook('cantata');
             $this->RegisterMdnsService();
+        }
+
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
         }
     }
 

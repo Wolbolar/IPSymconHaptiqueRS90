@@ -50,6 +50,7 @@ declare(strict_types=1);
 
             //We need to call the RegisterHook function on Kernel READY
             $this->RegisterMessage(0, IPS_KERNELMESSAGE);
+            $this->RegisterMessage(0, IPS_KERNELSTARTED);
 		}
 
 		public function Destroy(): void
@@ -106,7 +107,7 @@ declare(strict_types=1);
             }
         }
 
-        public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+        public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
         {
             //Never delete this line!
             parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
@@ -115,8 +116,15 @@ declare(strict_types=1);
                 $this->SendDebug(__FUNCTION__, '✅ Kernel READY – sende Initial-Events', 0);
                 $this->RegisterHook('haptique_kinconyhub/' . $this->InstanceID . '/download');
             }
-        }
 
+            if ($Message == IPS_KERNELSTARTED) {
+                $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+            }
+
+            if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+                $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
+            }
+        }
 
         /**
          * WebHook handler (download exported files from /media subfolder).

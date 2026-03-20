@@ -21,6 +21,8 @@ class HaptiqueRemote extends IPSModuleStrict
         //Never delete this line!
         parent::Create();
 
+        //we will wait until the kernel is ready
+        $this->RegisterMessage(0, IPS_KERNELMESSAGE);
         $this->RegisterMessage(0, IPS_KERNELSTARTED);
 
         $this->RegisterPropertyString('RemoteName', 'RX90 Living Room');
@@ -98,12 +100,21 @@ class HaptiqueRemote extends IPSModuleStrict
         $this->EnableAction('Backlight');
     }
 
-    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        if ($Message == IPS_KERNELMESSAGE) {
-            if ($Data[0] === KR_READY) {
+        //Never delete this line!
+        parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
-            }
+        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Ready", 0);
+        }
+
+        if ($Message == IPS_KERNELSTARTED) {
+            $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+        }
+
+        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+            $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
         }
     }
 
