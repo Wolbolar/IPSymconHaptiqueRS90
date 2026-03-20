@@ -75,6 +75,11 @@ class HaptiqueRemote extends IPSModuleStrict
         $this->RegisterVariableString('ActiveSequence', $this->Translate('Active Sequence'), '', 10);
         $this->RegisterVariableInteger('Battery', $this->Translate('Battery'), '~Intensity.100', 11);
         $this->RegisterVariableString('RemoteStatus', $this->Translate('Remote Status'), '', 12);
+
+        $this->RegisterTimer('DeferredKeyAction', 0, 'CRSXR_ProcessDeferredKeyAction(' . $this->InstanceID . ');');
+        $this->SetBuffer('PendingKeyActionKey', '');
+        $this->SetBuffer('PendingKeyActionApp', '');
+        $this->SetBuffer('LastProcessedKeyActionSignature', '');
     }
 
     public function Destroy(): void
@@ -98,24 +103,112 @@ class HaptiqueRemote extends IPSModuleStrict
         $this->EnableAction('LEDRingColor');
         $this->EnableAction('LEDRingEffect');
         $this->EnableAction('Backlight');
+
+        $lastKeyPressId = @$this->GetIDForIdent('LastKeyPress');
+        if (is_int($lastKeyPressId) && $lastKeyPressId > 0) {
+            $this->RegisterMessage($lastKeyPressId, VM_UPDATE);
+        }
+
+        $activeAppId = @$this->GetIDForIdent('ActiveApp');
+        if (is_int($activeAppId) && $activeAppId > 0) {
+            $this->RegisterMessage($activeAppId, VM_UPDATE);
+        }
+
+        $remoteId = trim($this->ReadPropertyString('RemoteID'));
+        if ($remoteId !== '' && $this->HasActiveParent()) {
+            $this->SubscribeTopic(sprintf('Haptique/%s/keys', $remoteId));
+            $this->SubscribeTopic(sprintf('Haptique/%s/battery_level', $remoteId));
+            $this->SubscribeTopic(sprintf('Haptique/%s/status', $remoteId));
+            $this->SubscribeTopic(sprintf('Haptique/%s/active_app', $remoteId));
+            $this->SubscribeTopic(sprintf('Haptique/%s/app/list', $remoteId));
+            $this->SubscribeTopic(sprintf('Haptique/%s/RGB/effect', $remoteId));
+        }
     }
 
     public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        //Never delete this line!
         parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
-        if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
+        if ($Message === IPS_KERNELMESSAGE && isset($Data[0]) && $Data[0] === KR_READY) {
             $this->SendDebug(__FUNCTION__, "🔄 Kernel Ready", 0);
+            $remoteId = trim($this->ReadPropertyString('RemoteID'));
+            if ($remoteId !== '' && $this->HasActiveParent()) {
+                $this->SubscribeTopic(sprintf('Haptique/%s/keys', $remoteId));
+                $this->SubscribeTopic(sprintf('Haptique/%s/battery_level', $remoteId));
+                $this->SubscribeTopic(sprintf('Haptique/%s/status', $remoteId));
+                $this->SubscribeTopic(sprintf('Haptique/%s/active_app', $remoteId));
+                $this->SubscribeTopic(sprintf('Haptique/%s/app/list', $remoteId));
+                $this->SubscribeTopic(sprintf('Haptique/%s/RGB/effect', $remoteId));
+            }
+            return;
         }
 
-        if ($Message == IPS_KERNELSTARTED) {
+        if ($Message === IPS_KERNELSTARTED) {
             $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+            return;
         }
 
-        if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
+        if ($Message === IM_CHANGESTATUS && isset($Data[0]) && $Data[0] == IS_ACTIVE) {
             $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
+            return;
         }
+
+        if ($Message !== VM_UPDATE) {
+            return;
+        }
+
+        $lastKeyPressId = @$this->GetIDForIdent('LastKeyPress');
+        if (!is_int($lastKeyPressId) || $lastKeyPressId <= 0) {
+            return;
+        }
+
+        if ($SenderID !== $lastKeyPressId) {
+            return;
+        }
+
+        $key = trim((string) GetValueString($lastKeyPressId));
+        if ($key === '') {
+            return;
+        }
+
+        $activeAppId = @$this->GetIDForIdent('ActiveApp');
+        $activeApp = '';
+        if (is_int($activeAppId) && $activeAppId > 0) {
+            $activeApp = trim((string) GetValueString($activeAppId));
+        }
+
+        $signature = $key . '|' . $activeApp;
+        $lastSignature = (string) $this->GetBuffer('LastProcessedKeyActionSignature');
+        if ($signature === $lastSignature) {
+            $this->SendDebug(__FUNCTION__, '⏭️ Duplicate key action ignored: ' . $signature, 0);
+            return;
+        }
+
+        $this->SetBuffer('LastProcessedKeyActionSignature', $signature);
+        $this->SetBuffer('PendingKeyActionKey', $key);
+        $this->SetBuffer('PendingKeyActionApp', $activeApp);
+        $this->SendDebug(__FUNCTION__, '🕒 Deferred key action queued: ' . $signature, 0);
+        $this->SetTimerInterval('DeferredKeyAction', 550);
+    }
+
+    private function SubscribeTopic(string $topic): void
+    {
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skip subscribe - no active parent', 0);
+            return;
+        }
+
+        $packet = [
+            'DataID' => '{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}',
+            'PacketType' => 8,
+            'Topic' => $topic,
+            'Payload' => '',
+            'QualityOfService' => 0,
+            'Retain' => false
+        ];
+
+        $this->SendDebug(__FUNCTION__, json_encode($packet, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0);
+        $this->SendDataToParent(json_encode($packet));
     }
 
     private function RegisterLedEffectProfile(): void
@@ -293,6 +386,11 @@ class HaptiqueRemote extends IPSModuleStrict
         $this->SendDebug('PublishMQTT Payload HEX', $payloadHex, 0);
         $this->SendDebug('PublishMQTT Payload Length', (string)strlen($payload), 0);
         $this->SendDebug('PublishMQTT Packet', json_encode($packet, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0);
+
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skip publish - no active parent', 0);
+            return;
+        }
 
         $this->SendDataToParent(json_encode($packet));
     }
@@ -983,7 +1081,6 @@ class HaptiqueRemote extends IPSModuleStrict
                 $this->debugLine('🎛️', 'KeyButton', (string)$btn);
                 $this->debugLine('🎯', 'KeyMapped', $mapped);
                 $this->SetLastKeyPress($mapped);
-                $this->handleStandardAppKeyAction($mapped);
             } else {
                 $this->debugLine('⚠️', 'KeyParseFailed', $decodedPayload);
             }
@@ -1101,6 +1198,44 @@ class HaptiqueRemote extends IPSModuleStrict
         }
 
         $this->SetValue('LastKeyPress', $normalizedValue);
+    }
+
+    public function ProcessDeferredKeyAction(): void
+    {
+        $this->SetTimerInterval('DeferredKeyAction', 0);
+
+        $key = trim((string) $this->GetBuffer('PendingKeyActionKey'));
+        $activeApp = trim((string) $this->GetBuffer('PendingKeyActionApp'));
+
+        $this->SetBuffer('PendingKeyActionKey', '');
+        $this->SetBuffer('PendingKeyActionApp', '');
+
+        if ($key === '') {
+            $this->SendDebug(__FUNCTION__, 'No pending key action found', 0);
+            return;
+        }
+
+        $this->SendDebug(__FUNCTION__, '▶️ Processing deferred key action | key=' . $key . ' | app=' . $activeApp, 0);
+
+        try {
+            if ($this->handleStandardAppKeyAction($key)) {
+                $this->SendDebug(__FUNCTION__, '✅ Standard key action executed for ' . $key, 0);
+                return;
+            }
+
+            $this->ProcessConfiguredAppKeyAction($activeApp, $key);
+        } catch (Throwable $e) {
+            $this->SendDebug(__FUNCTION__, '❌ Deferred key action failed: ' . $e->getMessage(), 0);
+        }
+    }
+
+    private function ProcessConfiguredAppKeyAction(string $activeApp, string $key): bool
+    {
+        $this->SendDebug(__FUNCTION__, 'Checking app-specific key action | app=' . $activeApp . ' | key=' . $key, 0);
+
+        // Placeholder for later expansion using the AppKeyAssignments list.
+        // For now, no app-specific action is executed yet.
+        return false;
     }
 
     public function SetActiveApp(string $value): void

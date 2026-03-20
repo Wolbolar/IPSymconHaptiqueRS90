@@ -328,9 +328,11 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         return $values;
     }
 
-    public function OnCheckboxClick($AVDevicesTree)
+    public function OnCheckboxClick(bool $selected)
     {
         $this->SendDebug('OnCheckboxClick', 'trigged', 0);
+        // TODO save values
+        /*
 
         // Prüfe, ob die Struktur korrekt ankommt und rekursiv durchgehen
         $treeData = $this->TreeViewToArray($AVDevicesTree);
@@ -394,6 +396,7 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         $treeDataSize = strlen(json_encode($previousTree));   // Größe der Daten bestimmen
         $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
         $this->WriteAttributeString('AVDevicesTree', json_encode($previousTree));
+        */
     }
 
     private function TreeViewToArray($tree): array
@@ -1440,13 +1443,13 @@ class HaptiqueIPDevicesConfigurator extends IPSModuleStrict
         return array_values($rowsByKey);
     }
 
-    public function UpdateVariableID($ID, $value_name)
+    public function UpdateVariableID(int $ID, string $value_name)
     {
         $this->SendDebug('UpdateVariableID', "Instance ID: " . $ID, 0);
         $this->UpdateFormField($value_name, 'variableID', $ID);
     }
 
-    public function UpdateLabelValue($Value, $VariableID, $formatted_name)
+    public function UpdateLabelValue(string $Value, int $VariableID, string $formatted_name)
     {
         // Debugging: Eingabewerte anzeigen
         $this->SendDebug('UpdateLabelValue', "Wert: " . $Value . " VariableID: " . $VariableID, 0);

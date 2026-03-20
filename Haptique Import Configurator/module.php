@@ -78,14 +78,28 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
 
     private function SendToSplitter(array $payload)
     {
-        // Anfrage an den Splitter senden
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'No active parent instance is available', 0);
+            return [];
+        }
+
         $response = $this->SendDataToParent(json_encode([
-            'DataID' => '{A04B56D8-C2A2-B7BB-11F1-523502DE2933}', // Hier die richtige DataID einsetzen
+            'DataID' => '{A04B56D8-C2A2-B7BB-11F1-523502DE2933}',
             'Payload' => $payload
         ]));
 
-        // Antwort decodieren und zurückgeben
-        return json_decode($response, true);
+        if ($response === false || $response === '' || $response === null) {
+            $this->SendDebug(__FUNCTION__, 'Parent returned no response', 0);
+            return [];
+        }
+
+        $decoded = json_decode((string) $response, true);
+        if (!is_array($decoded)) {
+            $this->SendDebug(__FUNCTION__, 'Parent returned invalid JSON: ' . (string) $response, 0);
+            return [];
+        }
+
+        return $decoded;
     }
 
     public function ReceiveData($JSONString): string
@@ -166,6 +180,11 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
 
     private function LoadAVDevices(): array
     {
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skipping AV device load because no active parent is connected', 0);
+            return [];
+        }
+
         // Gespeicherten Tree an den Splitter senden
         $this->SendAVDevicesTreeToSplitter();
 
@@ -229,6 +248,10 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
 
     private function SendAVDevicesTreeToSplitter()
     {
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skipping SetPreviousTree because no active parent is connected', 0);
+            return;
+        }
         // Das gespeicherte Attribut abrufen
         $avDevicesTree = $this->ReadAttributeString('AVDevicesTree');
 
@@ -241,25 +264,33 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
 
     private function GetToken()
     {
-        // Anfrage an den Splitter mit Action "LoadAVDevices"
+        if (!$this->HasActiveParent()) {
+            $this->SendDebug(__FUNCTION__, 'Skipping GetToken because no active parent is connected', 0);
+            return '';
+        }
+
         $token = $this->SendToSplitter([
             'Action' => 'GetToken'
         ]);
 
-        // Prüfen, ob die Antwort gültig ist
-        if (isset($token)) {
+        if (is_string($token) && $token !== '') {
             return $token;
         }
 
-        // Fallback für ungültige Antworten
-        $this->SendDebug('LoadAVDevices Error', 'Ungültige Antwort vom Splitter', 0);
-        return "";
+        if (is_array($token) && isset($token['Token']) && is_string($token['Token'])) {
+            return $token['Token'];
+        }
+
+        $this->SendDebug(__FUNCTION__, 'Invalid token response from splitter: ' . json_encode($token), 0);
+        return '';
     }
 
-    public function OnCheckboxClick($AVDevicesTree)
+    public function OnCheckboxClick(string $DeviceName, bool $Selection)
     {
         $this->SendDebug('OnCheckboxClick', 'trigged', 0);
 
+        // TODO save values
+        /*
         // Prüfe, ob die Struktur korrekt ankommt und rekursiv durchgehen
         $treeData = $this->TreeViewToArray($AVDevicesTree);
         $this->SendDebug('TreeView Data', json_encode($treeData), 0);
@@ -323,24 +354,7 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
         $treeDataSize = strlen(json_encode($previousTree));   // Größe der Daten bestimmen
         $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
         $this->WriteAttributeString('AVDevicesTree', json_encode($previousTree));
-    }
-
-    private function TreeViewToArray($tree): array
-    {
-        $result = [];
-
-        foreach ($tree as $item) {
-            $convertedItem = (array)$item;
-
-            // Recursively convert children first (so they are part of the pushed item)
-            if (isset($item->children) && is_array($item->children)) {
-                $convertedItem['children'] = $this->TreeViewToArray($item->children);
-            }
-
-            $result[] = $convertedItem;
-        }
-
-        return $result;
+        */
     }
 
     private function GetStoredScenes(): array
@@ -418,13 +432,27 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
             foreach ($instanceIDs as $instanceID) {
                 $this->SendDebug(__FUNCTION__, "Überprüfe Instanz-ID: $instanceID", 0);
 
-                // SceneID aus der Instanz abrufen
-                $instanceSceneID = IPS_GetProperty($instanceID, 'SceneID');
+                if (!IPS_InstanceExists($instanceID)) {
+                    $this->SendDebug(__FUNCTION__, "Instanz-ID $instanceID existiert nicht mehr und wird übersprungen.", 0);
+                    continue;
+                }
 
-                if ($instanceSceneID === $sceneID) {
+                $instanceData = @IPS_GetInstance($instanceID);
+                if (!is_array($instanceData)) {
+                    $this->SendDebug(__FUNCTION__, "Instanz-ID $instanceID liefert keine gültigen Instanzdaten und wird übersprungen.", 0);
+                    continue;
+                }
+
+                // SceneID aus der Instanz abrufen
+                $instanceSceneID = @IPS_GetProperty($instanceID, 'SceneID');
+
+                if ((int)$instanceSceneID === (int)$sceneID) {
                     // Werte aus der Instanz auslesen, da sie sich geändert haben könnten
-                    $configRow['Name'] = IPS_GetProperty($instanceID, 'Scenename');
-                    $configRow['Description'] = IPS_GetProperty($instanceID, 'Description');
+                    $sceneName = @IPS_GetProperty($instanceID, 'Scenename');
+                    $sceneDescription = @IPS_GetProperty($instanceID, 'Description');
+
+                    $configRow['Name'] = is_string($sceneName) ? $sceneName : $configRow['Name'];
+                    $configRow['Description'] = is_string($sceneDescription) ? $sceneDescription : $configRow['Description'];
                     $configRow['instanceID'] = $instanceID; // Instanz-ID zuordnen
 
                     $this->SendDebug(__FUNCTION__, "Instanz-ID $instanceID zu Szene mit SceneID $sceneID zugeordnet. Name und Description aus Instanz übernommen.", 0);
@@ -453,7 +481,10 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
             $profileName = $variable['VariableProfile'] ?? $variable['VariableCustomProfile'] ?? null;
 
             if ($profileName) {
-                $profile = IPS_GetVariableProfile($profileName);
+                $profile = @IPS_GetVariableProfile($profileName);
+                if (!is_array($profile) || !isset($profile['Associations']) || !is_array($profile['Associations'])) {
+                    return '';
+                }
                 foreach ($profile['Associations'] as $association) {
                     if ($association['Value'] == $value) {
                         return $association['Name'];
@@ -465,13 +496,13 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
         return ''; // Fallback: Kein formatierter Wert gefunden
     }
 
-    public function UpdateVariableID($ID, $value_name)
+    public function UpdateVariableID(int $ID, string $value_name)
     {
         $this->SendDebug('UpdateVariableID', "Instance ID: " . $ID, 0);
         $this->UpdateFormField($value_name, 'variableID', $ID);
     }
 
-    public function UpdateLabelValue($Value, $VariableID, $formatted_name)
+    public function UpdateLabelValue(string $Value, int $VariableID, string $formatted_name)
     {
         // Debugging: Eingabewerte anzeigen
         $this->SendDebug('UpdateLabelValue', "Wert: " . $Value . " VariableID: " . $VariableID, 0);
@@ -722,9 +753,7 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                             'edit' => [
                                                 'type' => 'CheckBox'
                                             ],
-                                            'onClick' => 'CRSC_OnCheckboxClick($id, $AVDevicesTree);', // Übergibt die gesamte Tree-Struktur
-                                            // 'onChange' => 'CRSS_OnCheckboxClick($id, json_encode($AVDevicesTree));', // Übergibt die gesamte Tree-Struktur
-                                            // 'onEdit' => 'CRSS_OnCheckboxClick($id, json_encode($AVDevicesTree));' // Übergibt die gesamte Tree-Struktur
+                                            'onEdit' => 'CRSS_OnCheckboxClick($id, $AVDevicesTree["DeviceName"], $AVDevicesTree["Selection"]);'
                                         ],
                                         [
                                             'caption' => $this->Translate('Instance ID'),
@@ -786,7 +815,7 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                                 'type' => 'SelectValue',
                                                 'value' => 0, // Standardwert
                                                 'variableID' => 0, // Dynamisch aktualisiert
-                                                'onChange' => 'CRSC_UpdateLabelValue($id, $Value1, $VariableID1, "FormatedValue1");',
+                                                'onChange' => 'CRSC_UpdateLabelValue($id, (string) $Value1, $VariableID1, "FormatedValue1");',
                                             ]
                                         ],
                                         [

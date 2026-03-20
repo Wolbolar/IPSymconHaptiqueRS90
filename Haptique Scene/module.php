@@ -154,7 +154,7 @@ class HaptiqueScene extends IPSModuleStrict
         $this->SendDebug(__FUNCTION__, "Button $button nicht gefunden", 0);
     }
 
-    public function UpdateVariableID($ID)
+    public function UpdateVariableID(int $ID)
     {
         $this->SendDebug('UpdateVariableID', $ID, 0);
         $this->UpdateFormField('Value', 'variableID', $ID);

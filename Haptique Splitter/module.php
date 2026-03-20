@@ -79,6 +79,8 @@ class HaptiqueSplitter extends IPSModuleStrict
         $this->RegisterPropertyString('RS90_Password', '');
         $this->RegisterAttributeString('RS90_AccessToken', '');
         $this->RegisterAttributeString('RS90_Cookie', '');
+        $this->RegisterAttributeBoolean('RS90_LoginFailed', false);
+        $this->RegisterAttributeString('RS90_LastError', '');
 
         $this->RegisterAttributeString('RS90_Dashboard', '');
         $this->RegisterAttributeString('RS90_ConnectedRemotes', '');
@@ -124,9 +126,24 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $url = self::BASE_URL . "/app/auth/login/app";
 
+        $user = trim($this->ReadPropertyString('RS90_User'));
+        $password = (string) $this->ReadPropertyString('RS90_Password');
+
+        $this->SendDebug(__FUNCTION__, 'Starting login for user: ' . $user . ' | password length: ' . strlen($password), 0);
+
+        if ($user === '' || $password === '') {
+            $message = 'RS90 login failed: user or password is empty';
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return 'ERROR: ' . $message;
+        }
+
         $credentials = [
-            "email" => $this->ReadPropertyString('RS90_User'),
-            "password" => $this->ReadPropertyString('RS90_Password')
+            'email' => $user,
+            'password' => $password
         ];
 
         $ch = curl_init();
@@ -135,7 +152,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($credentials));
-        curl_setopt($ch, CURLOPT_HEADER, true); // wichtig, um Header & Cookie zu erhalten
+        curl_setopt($ch, CURLOPT_HEADER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
             'Accept: */*',
@@ -143,29 +160,79 @@ class HaptiqueSplitter extends IPSModuleStrict
         ]);
 
         $response = curl_exec($ch);
-        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-        $header = substr($response, 0, $headerSize);
-        $body = substr($response, $headerSize);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $error = curl_error($ch);
         curl_close($ch);
 
-        $this->SendDebug("RS90_Login", "Header: $header", 0);
-        $this->SendDebug("RS90_Login", "Body: $body", 0);
+        if ($response === false) {
+            $message = 'RS90 login cURL error: ' . $error;
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return 'ERROR: ' . $message;
+        }
 
-        // Access Token extrahieren
+        $header = substr($response, 0, $headerSize);
+        $body = substr($response, $headerSize);
+
+        $this->SendDebug(__FUNCTION__, 'HTTP Code: ' . $httpCode, 0);
+        $this->SendDebug(__FUNCTION__, 'Header length: ' . strlen($header) . ' | Body length: ' . strlen($body), 0);
+
         $data = json_decode($body, true);
-        if (isset($data['data']['accessToken'])) {
-            $token = $data['data']['accessToken'];
-            $this->WriteAttributeString('RS90_AccessToken', $token);
-        } else {
-            return "ERROR: accessToken not found";
+        if (!is_array($data)) {
+            $message = 'RS90 login failed: invalid JSON response';
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message . ' | body: ' . $body, 0);
+            return 'ERROR: ' . $message;
         }
 
-        // Cookie extrahieren
-        if (preg_match('/set-cookie:\s*connect\.sid=([^;]+);/i', $header, $matches)) {
-            $cookie = $matches[1];
-            $this->WriteAttributeString('RS90_Cookie', $cookie);
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $apiMessage = (string)($data['message'] ?? 'Unexpected HTTP status');
+            $message = 'RS90 login failed: HTTP ' . $httpCode . ' - ' . $apiMessage;
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return 'ERROR: ' . $message;
         }
 
+        if (!isset($data['data']['accessToken']) || trim((string) $data['data']['accessToken']) === '') {
+            $apiMessage = (string)($data['message'] ?? 'accessToken not found');
+            $message = 'RS90 login failed: ' . $apiMessage;
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return 'ERROR: ' . $message;
+        }
+
+        $token = trim((string) $data['data']['accessToken']);
+        $this->WriteAttributeString('RS90_AccessToken', $token);
+
+        if (!preg_match('/set-cookie:\\s*connect\\.sid=([^;]+);/i', $header, $matches)) {
+            $message = 'RS90 login failed: connect.sid cookie not found';
+            $this->WriteAttributeString('RS90_AccessToken', '');
+            $this->WriteAttributeString('RS90_Cookie', '');
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return 'ERROR: ' . $message;
+        }
+
+        $cookie = trim((string) $matches[1]);
+        $this->WriteAttributeString('RS90_Cookie', $cookie);
+        $this->WriteAttributeBoolean('RS90_LoginFailed', false);
+        $this->WriteAttributeString('RS90_LastError', '');
+
+        $this->SendDebug(__FUNCTION__, 'RS90 login successful | token length: ' . strlen($token) . ' | cookie length: ' . strlen($cookie), 0);
         return $token;
     }
 
@@ -328,10 +395,22 @@ class HaptiqueSplitter extends IPSModuleStrict
      */
     private function CallCantataAPI(string $endpoint, array $postData = []): ?array
     {
-        $token = $this->ReadAttributeString('RS90_AccessToken');
-        $cookie = $this->ReadAttributeString('RS90_Cookie');
+        $token = trim($this->ReadAttributeString('RS90_AccessToken'));
+        $cookie = trim($this->ReadAttributeString('RS90_Cookie'));
+
+        if ($token === '' || $cookie === '') {
+            $this->SendDebug(__FUNCTION__, 'Missing RS90 token/cookie before API call -> trying RS90_Login()', 0);
+            $loginResult = $this->RS90_Login();
+            if (strpos($loginResult, 'ERROR:') === 0) {
+                $this->SendDebug(__FUNCTION__, 'API call aborted because login failed: ' . $loginResult, 0);
+                return null;
+            }
+            $token = trim($this->ReadAttributeString('RS90_AccessToken'));
+            $cookie = trim($this->ReadAttributeString('RS90_Cookie'));
+        }
 
         $url = self::BASE_URL . $endpoint;
+        $this->SendDebug(__FUNCTION__, 'Calling endpoint: ' . $endpoint . ' | payload: ' . json_encode($postData), 0);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -348,18 +427,41 @@ class HaptiqueSplitter extends IPSModuleStrict
         ]);
 
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $this->SendDebug('CallCantataAPI', 'HTTP Code: ' . $httpCode . ' | Response length: ' . (is_string($response) ? strlen($response) : 0), 0);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
         curl_close($ch);
 
         if ($response === false) {
-            $this->SendDebug("CallCantataAPI", "Fehler: $error", 0);
+            $message = 'Cantata API cURL error for ' . $endpoint . ': ' . $error;
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
             return null;
         }
 
-        $this->SendDebug("CallCantataAPI", "Antwort: $response", 0);
+        $this->SendDebug(__FUNCTION__, 'HTTP Code: ' . $httpCode . ' | Response length: ' . strlen($response), 0);
+        $this->SendDebug(__FUNCTION__, 'Response: ' . $response, 0);
+
         $data = json_decode($response, true);
+        if (!is_array($data)) {
+            $message = 'Cantata API invalid JSON response for ' . $endpoint;
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return null;
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $apiMessage = (string)($data['message'] ?? 'Unexpected HTTP status');
+            $message = 'Cantata API call failed for ' . $endpoint . ': HTTP ' . $httpCode . ' - ' . $apiMessage;
+            $this->WriteAttributeBoolean('RS90_LoginFailed', true);
+            $this->WriteAttributeString('RS90_LastError', $message);
+            $this->SendDebug(__FUNCTION__, $message, 0);
+            return $data;
+        }
+
+        $this->WriteAttributeBoolean('RS90_LoginFailed', false);
+        $this->WriteAttributeString('RS90_LastError', '');
         return $data;
     }
 
@@ -425,6 +527,36 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $json = $this->ReadAttributeString('RS90_ConnectedRemotes');
         return json_decode($json, true);
+    }
+
+    public function RefreshConfigurationData(): void
+    {
+        $this->SendDebug(__FUNCTION__, 'Manual refresh of RS90 configuration data started', 0);
+
+        $sequences = $this->GetFormCompatibleSequences();
+        $rooms = $this->RS90_GetRoomsFormatted();
+        $devices = $this->RS90_GetDeviceDashboardFormatted();
+        $customDevices = $this->GetCustomURLDeviceListFormatted();
+
+        @$this->UpdateFormField('SequenceList', 'values', is_array($sequences) ? $sequences : []);
+        @$this->UpdateFormField('RoomList', 'values', is_array($rooms) ? $rooms : []);
+        @$this->UpdateFormField('DeviceDashboard', 'values', is_array($devices) ? $devices : []);
+        @$this->UpdateFormField('custom_devices', 'values', is_array($customDevices) ? $customDevices : []);
+
+        if ($this->ReadAttributeBoolean('RS90_LoginFailed')) {
+            $warning = '⚠️ RS90 login failed. Please verify the user name and password.';
+            $detail = trim($this->ReadAttributeString('RS90_LastError'));
+            if ($detail !== '') {
+                $warning .= ' Details: ' . $detail;
+            }
+            @$this->UpdateFormField('RS90LoginWarning', 'visible', true);
+            @$this->UpdateFormField('RS90LoginWarning', 'caption', $warning);
+            $this->SendDebug(__FUNCTION__, $warning, 0);
+        } else {
+            @$this->UpdateFormField('RS90LoginWarning', 'visible', false);
+        }
+
+        $this->SendDebug(__FUNCTION__, 'Manual refresh of RS90 configuration data finished', 0);
     }
 
 
@@ -2313,7 +2445,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $this->SendDebug('HaptiqueEmulator', "Fehler gesendet: $code $statusText – $message", 0);
     }
 
-    public function NewIDLightSwitch($LightSwitches)
+    protected function NewIDLightSwitch($LightSwitches)
     {
         $values = [];
         foreach ($LightSwitches as $target) {
@@ -2411,7 +2543,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     }
 
     // Methode zur Überprüfung des Variablentyps
-    public function CheckVariableType($variableID)
+    public function CheckVariableType(int $variableID)
     {
         $variable = IPS_GetVariable($variableID);
 
@@ -2714,76 +2846,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         return $extractedCommands;
     }
 
-    public function OnCheckboxClick1($AVDevicesTree)
-    {
-        $this->SendDebug('OnCheckboxClick', 'triggered', 0);
-
-        // Prüfe, ob die Struktur korrekt ankommt und rekursiv durchgehen
-        $treeData = $this->TreeViewToArray($AVDevicesTree);
-        $this->SendDebug('TreeView Data', json_encode($treeData), 0);
-
-        // Den aktuell gespeicherten TreeView-Zustand auslesen
-        $previousTree = json_decode($this->ReadAttributeString('AVDevicesTree'), true);
-        $this->SendDebug('Previous Tree', json_encode($previousTree), 0);
-
-        // Teste den Fall, ob die Bäume leer sind
-        if (empty($treeData)) {
-            $this->SendDebug('TreeData', 'TreeData ist leer', 0);
-        }
-
-        if (empty($previousTree)) {
-            $this->SendDebug('PreviousTree', 'PreviousTree ist leer', 0);
-        }
-
-        // Vergleiche die neuen und alten Checkbox-Status
-        foreach ($treeData as $key => $currentItem) {
-            // Prüfen, ob 'Command' existiert. Wenn ja, diesen Eintrag überspringen, da er uns nicht interessiert.
-            if (isset($currentItem['Command']) && !empty($currentItem['Command'])) {
-                continue; // Überspringe Einträge mit 'Command'
-            }
-
-            $this->SendDebug('Current Item', json_encode($currentItem), 0);
-
-            // Prüfen, ob 'DeviceName' existiert
-            if (!isset($currentItem['DeviceName'])) {
-                $this->SendDebug('Missing DeviceName', "Kein DeviceName für Key: $key", 0);
-                continue; // Überspringe diesen Eintrag, wenn kein 'DeviceName' vorhanden ist
-            }
-
-            // Prüfen, ob 'checked' ein Array ist und wie darauf zugegriffen wird
-            if (is_array($currentItem['checked'])) {
-                $checkedValue = $currentItem['checked']['value']; // Falls 'checked' ein Array ist, nimm den 'value'-Schlüssel
-            } else {
-                $checkedValue = $currentItem['checked']; // Falls es kein Array ist, nimm den Wert direkt
-            }
-
-            // Prüfen, ob der Schlüssel im previousTree existiert
-            if (!isset($previousTree[$key])) {
-                $this->SendDebug('Missing Key', "Key $key fehlt im previousTree", 0);
-                continue; // Überspringe diesen Eintrag, wenn der Schlüssel fehlt
-            }
-
-            $this->SendDebug('Previous Item', json_encode($previousTree[$key]), 0);
-
-            // Nun die 'checked'-Werte vergleichen
-            if ($checkedValue !== $previousTree[$key]['checked']['value']) {
-                $this->SendDebug('Checkbox Changed', "Device: " . $currentItem['DeviceName'] . " - New Checked Value: " . $checkedValue, 0);
-
-                // Speichere die Änderung im previousTree
-                $previousTree[$key]['checked']['value'] = $checkedValue;
-            } else {
-                $this->SendDebug('No Change', "Device: " . $currentItem['DeviceName'] . " - Checked Value bleibt unverändert", 0);
-            }
-        }
-
-        $treeDataSize = strlen(json_encode($previousTree));   // Größe der Daten bestimmen
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
-        // Aktualisierten Tree-Zustand speichern
-        $this->WriteAttributeString('AVDevicesTree', json_encode($previousTree));
-    }
-
-
-    public function FormFieldUpdate(string $field, string $parameter, $value)
+    public function FormFieldUpdate(string $field, string $parameter, string $value)
     {
         $this->UpdateFormField($field, $parameter, $value);
     }
@@ -2803,7 +2866,8 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         $treeDataSize = strlen($AVDevicesTree);   // Größe der Daten bestimmen
         $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
-        return json_decode($AVDevicesTree, true);
+        $decoded = json_decode($AVDevicesTree, true);
+        return is_array($decoded) ? $decoded : [];
     }
 
     public function DeleteAV_Devices()
@@ -2876,11 +2940,19 @@ class HaptiqueSplitter extends IPSModuleStrict
     public function RS90_GetRoomsFormatted(): array
     {
         $rooms = $this->RS90_GetRooms();
+        if (!is_array($rooms)) {
+            $this->SendDebug(__FUNCTION__, 'RS90_GetRooms returned no array', 0);
+            return [];
+        }
+
         $result = [];
         foreach ($rooms as $room) {
+            if (!is_array($room)) {
+                continue;
+            }
             $result[] = [
-                'name' => $room['name'],
-                'id' => $room['id']
+                'name' => $room['name'] ?? '',
+                'id' => $room['id'] ?? ''
             ];
         }
         return $result;
@@ -2890,19 +2962,37 @@ class HaptiqueSplitter extends IPSModuleStrict
      * Gibt die Geräteübersicht formatiert für das Formular zurück.
      * @return array
      */
-    public function RS90_GetDeviceDashboardFormatted()
+    public function RS90_GetDeviceDashboardFormatted(): array
     {
         $raw = $this->RS90_GetDeviceDashboard();
+        if (!is_array($raw)) {
+            $this->SendDebug(__FUNCTION__, 'RS90_GetDeviceDashboard returned no array', 0);
+            return [];
+        }
+
         $result = [];
 
         foreach ($raw as $entry) {
-            $categories = [];
-            foreach ($entry['devices'] as $device) {
-                $categories[] = $device['categoryName'] . ' (' . $device['count'] . ')';
+            if (!is_array($entry)) {
+                continue;
             }
+
+            $categories = [];
+            $devices = isset($entry['devices']) && is_array($entry['devices']) ? $entry['devices'] : [];
+
+            foreach ($devices as $device) {
+                if (!is_array($device)) {
+                    continue;
+                }
+
+                $categoryName = (string) ($device['categoryName'] ?? '');
+                $count = (string) ($device['count'] ?? '');
+                $categories[] = $categoryName . ($count !== '' ? ' (' . $count . ')' : '');
+            }
+
             $result[] = [
-                'label' => $entry['label'],
-                'isIntegrated' => $entry['isIntegrated'],
+                'label' => $entry['label'] ?? '',
+                'isIntegrated' => $entry['isIntegrated'] ?? false,
                 'categoryList' => implode(', ', $categories)
             ];
         }
@@ -2917,50 +3007,32 @@ class HaptiqueSplitter extends IPSModuleStrict
      */
     private function GetCustomURLDeviceListFormatted(): array
     {
-        // Neuer Block für Custom Devices, analog zum neuen Formular-Code
         $deviceList = $this->RS90_GetCustomURLDevices();
+        if (!is_array($deviceList)) {
+            $this->SendDebug(__FUNCTION__, 'RS90_GetCustomURLDevices returned no array', 0);
+            return [];
+        }
+
+        $records = isset($deviceList['records']) && is_array($deviceList['records']) ? $deviceList['records'] : [];
         $formattedDevices = [];
 
-        foreach ($deviceList['records'] as $device) {
-            $device_id = $device['id'];
-
-            // Build commands array as per specification
-            $commands = [];
-            /*
-            $device_details = $this->RS90_GetDeviceCommands($device_id);
-            if (isset($device_details['controls']) && is_array($device_details['controls'])) {
-                foreach ($device_details['controls'] as $cmd) {
-                    $entry = [
-                        'name' => $cmd['name'] ?? '',
-                        'method' => $cmd['referenceData']['method'] ?? '',
-                        'ip' => '',
-                        'command' => '',
-                        'url' => ''
-                    ];
-                    switch (strtoupper($entry['method'])) {
-                        case 'ADB':
-                        case 'TELNET':
-                            $entry['ip'] = $cmd['referenceData']['ip'] ?? '';
-                            $entry['command'] = $cmd['referenceData']['command'] ?? '';
-                            break;
-                        case 'GET':
-                        case 'POST':
-                            $entry['url'] = $cmd['referenceData']['command'] ?? '';
-                            break;
-                    }
-                    $commands[] = $entry;
-                }
+        foreach ($records as $device) {
+            if (!is_array($device)) {
+                continue;
             }
-            $device['commands'] = $commands;
-            */
+
+            $device_id = $device['id'] ?? '';
+            $commands = [];
+
             $formattedDevices[] = [
-                'name' => $device['name'],
+                'name' => $device['name'] ?? '',
                 'device_id' => $device_id,
                 'base_url' => $device['ip'] ?? 'http://192.168.0.1',
                 'commands' => $commands
             ];
         }
-        $this->SendDebug('GetCustomURLDeviceListFormatted', json_encode($formattedDevices), 0);
+
+        $this->SendDebug(__FUNCTION__, json_encode($formattedDevices), 0);
         return $formattedDevices;
     }
 
@@ -3109,6 +3181,12 @@ class HaptiqueSplitter extends IPSModuleStrict
                 'caption' => 'RS90 Zugangsdaten',
                 'items' => [
                     [
+                        'type' => 'Label',
+                        'name' => 'RS90LoginWarning',
+                        'caption' => '⚠️ RS90 login failed. Please verify the user name and password.',
+                        'visible' => $this->ReadAttributeBoolean('RS90_LoginFailed')
+                    ],
+                    [
                         'name' => 'RS90_User',
                         'type' => 'ValidationTextBox',
                         'caption' => 'E-Mail'
@@ -3117,7 +3195,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                         'name' => 'RS90_Password',
                         'type' => 'PasswordTextBox',
                         'caption' => 'Passwort'
-                    ]
+                    ],
                 ]
             ],
             [
@@ -3237,7 +3315,6 @@ class HaptiqueSplitter extends IPSModuleStrict
                                 'name' => 'device_id',
                                 'width' => 'auto',
                                 'add' => '',
-                                'onClick' => 'print_r($custom_devices["device_id"]);',
                                 'save' => true
                             ],
                             [
@@ -3254,9 +3331,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                                 'caption' => 'Commands',
                                 'name' => 'commands',
                                 'width' => '300px',
-                                // 'onClick' => 'print_r($custom_devices["device_id"]);',
-                                'onClick' => 'CRSS_Set_Current_Device($id, $custom_devices["device_id"]);',
-                                'onEdit' => 'CRSS_Set_Current_Device($id, $custom_devices["device_id"]);',
+                                // 'onEdit' => 'CRSS_Set_Current_Device($id, $custom_devices["device_id"]);',
                                 'edit' => [
                                     'type' => 'List',
                                     'rowCount' => 10,
@@ -3334,7 +3409,6 @@ class HaptiqueSplitter extends IPSModuleStrict
                                             'url' => 'http://example.com/command2'
                                         ]
                                     ]
-                                    //'values' => $this->GetCommandListForm()
                                 ],
                                 'add' => [],
                                 'save' => true
@@ -3448,6 +3522,11 @@ class HaptiqueSplitter extends IPSModuleStrict
     protected function FormActions(): array
     {
         $form = [
+            [
+                'type' => 'Button',
+                'caption' => 'Refresh RS90 Data',
+                'onClick' => 'CRSS_RefreshConfigurationData($id);'
+            ]
         ];
         return $form;
     }
