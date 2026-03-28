@@ -60,6 +60,9 @@ class HaptiqueRemote extends IPSModuleStrict
         $this->RegisterPropertyBoolean('StandardKeySoft2Enabled', true);
         $this->RegisterPropertyBoolean('StandardKeySoft3Enabled', true);
 
+        $this->RegisterPropertyInteger('AppScriptsCategoryID', 0);
+        $this->RegisterPropertyInteger('LEDScriptsCategoryID', 0);
+
         $this->RegisterLedEffectProfile();
         $this->RegisterActiveAppProfile();
         // Variables
@@ -1367,7 +1370,63 @@ class HaptiqueRemote extends IPSModuleStrict
         return $values;
     }
 
-    private function getAppKeyAssignmentFormValues(): array
+    private function getRs90KeyAssignmentKeys(): array
+    {
+        return [
+            'Power',
+            'Home',
+            'Microphone',
+            'Up',
+            'Down',
+            'NavUp',
+            'NavDown',
+            'NavLeft',
+            'NavRight',
+            'OK',
+            'Plus',
+            'Minus',
+            'Back',
+            'Menu',
+            'Mute',
+            'Rewind',
+            'PlayPause',
+            'Forward',
+            'AppsOrDevices',
+            'InputOrGuide',
+            'Settings',
+            'Soft1',
+            'Soft2',
+            'Soft3'
+        ];
+    }
+
+    private function getGenericTargetValueOptions(): array
+    {
+        return [
+            ['caption' => '', 'value' => ''],
+            ['caption' => '0', 'value' => '0'],
+            ['caption' => '1', 'value' => '1'],
+            ['caption' => 'false', 'value' => 'false'],
+            ['caption' => 'true', 'value' => 'true']
+        ];
+    }
+
+    private function buildDefaultEmbeddedKeyAssignments(): array
+    {
+        $values = [];
+
+        foreach ($this->getRs90KeyAssignmentKeys() as $key) {
+            $values[] = [
+                'key' => $key,
+                'variableID' => 0,
+                'targetValue' => ''
+            ];
+        }
+
+        return $values;
+    }
+
+    private function buildDefaultAppKeyAssignments(): array
     {
         $apps = $this->GetInstalledApps();
         $values = [];
@@ -1389,8 +1448,7 @@ class HaptiqueRemote extends IPSModuleStrict
             $values[] = [
                 'app' => $name,
                 'package' => $package,
-                'key' => '',
-                'action' => ''
+                'keyMappings' => $this->buildDefaultEmbeddedKeyAssignments()
             ];
         }
 
@@ -1399,6 +1457,314 @@ class HaptiqueRemote extends IPSModuleStrict
         });
 
         return $values;
+    }
+
+    private function getStoredAppKeyAssignments(): array
+    {
+        $json = $this->ReadAttributeString('AppKeyAssignments');
+        $data = json_decode($json, true);
+
+        if (!is_array($data)) {
+            return [];
+        }
+
+        return $data;
+    }
+
+    public function SaveAppKeyAssignments(array $assignments): void
+    {
+        $normalizedAssignments = [];
+        $validKeys = $this->getRs90KeyAssignmentKeys();
+
+        foreach ($assignments as $assignment) {
+            if (!is_array($assignment)) {
+                continue;
+            }
+
+            $app = isset($assignment['app']) && is_string($assignment['app']) ? trim($assignment['app']) : '';
+            $package = isset($assignment['package']) && is_string($assignment['package']) ? trim($assignment['package']) : '';
+            $keyMappings = isset($assignment['keyMappings']) && is_array($assignment['keyMappings'])
+                ? $assignment['keyMappings']
+                : [];
+
+            $normalizedKeyMappings = [];
+            foreach ($keyMappings as $mapping) {
+                if (!is_array($mapping)) {
+                    continue;
+                }
+
+                $key = isset($mapping['key']) && is_string($mapping['key']) ? trim($mapping['key']) : '';
+                if ($key === '' || !in_array($key, $validKeys, true)) {
+                    continue;
+                }
+
+                $variableID = isset($mapping['variableID']) ? (int) $mapping['variableID'] : 0;
+                $targetValue = isset($mapping['targetValue']) ? (string) $mapping['targetValue'] : '';
+
+                $normalizedKeyMappings[] = [
+                    'key' => $key,
+                    'variableID' => $variableID,
+                    'targetValue' => $targetValue
+                ];
+            }
+
+            usort($normalizedKeyMappings, static function (array $a, array $b): int {
+                return strcasecmp((string) $a['key'], (string) $b['key']);
+            });
+
+            $normalizedAssignments[] = [
+                'app' => $app,
+                'package' => $package,
+                'keyMappings' => $normalizedKeyMappings
+            ];
+        }
+
+        usort($normalizedAssignments, static function (array $a, array $b): int {
+            return strcasecmp((string) $a['app'], (string) $b['app']);
+        });
+
+        $json = json_encode($normalizedAssignments, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            throw new Exception('Unable to encode app key assignments.');
+        }
+
+        $this->WriteAttributeString('AppKeyAssignments', $json);
+        $this->SendDebug(__FUNCTION__, 'Saved app key assignments: ' . count($normalizedAssignments), 0);
+    }
+
+    private function getAppKeyAssignmentFormValues(): array
+    {
+        $storedAssignments = $this->getStoredAppKeyAssignments();
+        if (count($storedAssignments) === 0) {
+            $defaultAssignments = $this->buildDefaultAppKeyAssignments();
+            $this->SaveAppKeyAssignments($defaultAssignments);
+            return $defaultAssignments;
+        }
+
+        $apps = $this->GetInstalledApps();
+        $values = [];
+        $storedByPackage = [];
+        $storedByApp = [];
+
+        foreach ($storedAssignments as $storedAssignment) {
+            if (!is_array($storedAssignment)) {
+                continue;
+            }
+
+            $storedPackage = isset($storedAssignment['package']) && is_string($storedAssignment['package']) ? trim($storedAssignment['package']) : '';
+            $storedApp = isset($storedAssignment['app']) && is_string($storedAssignment['app']) ? trim($storedAssignment['app']) : '';
+
+            if ($storedPackage !== '') {
+                $storedByPackage[$storedPackage] = $storedAssignment;
+            }
+            if ($storedApp !== '') {
+                $storedByApp[$storedApp] = $storedAssignment;
+            }
+        }
+
+        foreach ($apps as $app) {
+            if (!is_array($app)) {
+                continue;
+            }
+
+            $name = isset($app['name']) && is_string($app['name']) ? $app['name'] : '';
+            $package = (isset($app['id']) && is_string($app['id']))
+                ? $app['id']
+                : ((isset($app['Id']) && is_string($app['Id'])) ? $app['Id'] : '');
+
+            if ($name === '' && $package === '') {
+                continue;
+            }
+
+            $storedAssignment = null;
+            if ($package !== '' && isset($storedByPackage[$package]) && is_array($storedByPackage[$package])) {
+                $storedAssignment = $storedByPackage[$package];
+            } elseif ($name !== '' && isset($storedByApp[$name]) && is_array($storedByApp[$name])) {
+                $storedAssignment = $storedByApp[$name];
+            }
+
+            if ($storedAssignment === null) {
+                $values[] = [
+                    'app' => $name,
+                    'package' => $package,
+                    'keyMappings' => $this->buildDefaultEmbeddedKeyAssignments()
+                ];
+                continue;
+            }
+
+            $keyMappings = isset($storedAssignment['keyMappings']) && is_array($storedAssignment['keyMappings'])
+                ? $storedAssignment['keyMappings']
+                : [];
+
+            $normalizedMappings = [];
+            $existingKeys = [];
+
+            foreach ($keyMappings as $mapping) {
+                if (!is_array($mapping)) {
+                    continue;
+                }
+
+                $key = isset($mapping['key']) && is_string($mapping['key']) ? trim($mapping['key']) : '';
+                if ($key === '') {
+                    continue;
+                }
+
+                $existingKeys[] = $key;
+                $normalizedMappings[] = [
+                    'key' => $key,
+                    'variableID' => isset($mapping['variableID']) ? (int) $mapping['variableID'] : 0,
+                    'targetValue' => isset($mapping['targetValue']) ? (string) $mapping['targetValue'] : ''
+                ];
+            }
+
+            foreach ($this->getRs90KeyAssignmentKeys() as $defaultKey) {
+                if (!in_array($defaultKey, $existingKeys, true)) {
+                    $normalizedMappings[] = [
+                        'key' => $defaultKey,
+                        'variableID' => 0,
+                        'targetValue' => ''
+                    ];
+                }
+            }
+
+            usort($normalizedMappings, static function (array $a, array $b): int {
+                return strcasecmp((string) $a['key'], (string) $b['key']);
+            });
+
+            $values[] = [
+                'app' => $name,
+                'package' => $package,
+                'keyMappings' => $normalizedMappings
+            ];
+        }
+
+        usort($values, static function (array $a, array $b): int {
+            return strcasecmp((string) $a['app'], (string) $b['app']);
+        });
+
+        $this->SaveAppKeyAssignments($values);
+        return $values;
+    }
+
+    public function GenerateAppScripts(bool $enabled, int $categoryID): void
+    {
+        if (!$enabled) {
+            return;
+        }
+
+        $this->CreateAppScripts($categoryID);
+
+        $this->UpdateFormField('GenerateAppScripts', 'checked', false);
+    }
+
+    public function GenerateLEDScripts(bool $enabled, int $categoryID): void
+    {
+        if (!$enabled) {
+            return;
+        }
+
+        $this->CreateLEDScripts($categoryID);
+
+        $this->UpdateFormField('GenerateLEDScripts', 'checked', false);
+    }
+
+    private function CreateAppScripts(int $parentID): void
+    {
+        if (!IPS_ObjectExists($parentID)) {
+            throw new Exception('Kategorie ungültig');
+        }
+
+        $apps = $this->GetInstalledAppsIndexed();
+
+        if (!is_array($apps)) {
+            throw new Exception('Keine Apps gefunden');
+        }
+
+        $pos = 10;
+
+        foreach ($apps as $app) {
+
+            $name = $app['name'] ?? '';
+            $pkg  = $app['id'] ?? '';
+
+            if ($name === '' && $pkg === '') {
+                continue;
+            }
+
+            $display = $name !== '' ? $name : $pkg;
+
+            $script = IPS_CreateScript(0);
+            IPS_SetParent($script, $parentID);
+            IPS_SetName($script, sprintf('%02d %s', $pos / 10, $display));
+            IPS_SetPosition($script, $pos);
+
+            IPS_SetScriptContent($script,
+                "<?php\n\n" .
+                '$id = ' . $this->InstanceID . ";\n" .
+                '$app = ' . var_export($display, true) . ";\n\n" .
+                "CRSXR_OpenInstalledApp(\$id, \$app);\n"
+            );
+
+            $pos += 10;
+        }
+    }
+
+    private function CreateLEDScripts(int $parentID): void
+    {
+        if (!IPS_ObjectExists($parentID)) {
+            throw new Exception('Kategorie ungültig');
+        }
+
+        $effects = [
+            '01 LED Off' => ['effect' => 'off'],
+            '02 Solid Color' => ['effect' => 'solidColor', 'color' => '00CCFF'],
+            '03 Strobe Flash' => ['effect' => 'strobeFlash', 'color' => 'FFFF00', 'speed' => 40, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '04 Breathing Pulse' => ['effect' => 'breathingPulse', 'color' => 'FF00FF', 'duration' => 1500, 'steps' => 60, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '05 Rainbow Cycle' => ['effect' => 'rainbowCycle', 'speed' => 30, 'repeatCount' => -1, 'durationSeconds' => 10],
+            '06 Rainbow Chase' => ['effect' => 'rainbowChase', 'speed' => 150, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '07 Color Wave' => ['effect' => 'colorWave', 'color' => '008080', 'speed' => 80, 'waveWidth' => 5, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '08 Theater March' => ['effect' => 'theaterMarch', 'color' => 'FFD700', 'speed' => 120, 'spacing' => 4, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '09 Color Sweep' => ['effect' => 'colorSweep', 'color' => '800080', 'speed' => 100, 'repeatCount' => -1, 'durationSeconds' => 10],
+            '10 Sparkle Burst' => ['effect' => 'sparkleBurst', 'color' => 'FFFAED', 'speed' => 70, 'density' => 5, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '11 Twinkle Stars' => ['effect' => 'twinkleStars', 'colors' => 'FFB6C1,E6E6FA,FFFACD,AFEEEE', 'speed' => 150, 'repeatCount' => -1, 'durationSeconds' => 10],
+            '12 Comet Trail' => ['effect' => 'cometTrail', 'color' => 'FF4500', 'speed' => 60, 'tailLength' => 6, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '13 Dual Flash' => ['effect' => 'dualFlash', 'color1' => '00FF00', 'color2' => 'FF1493', 'speed' => 400, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '14 Police Siren' => ['effect' => 'policeSiren', 'speed' => 120, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '15 Fire Flicker' => ['effect' => 'fireFlicker', 'speed' => 90, 'repeatCount' => -1, 'durationSeconds' => 10],
+            '16 Random Burst' => ['effect' => 'randomBurst', 'speed' => 250, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '17 Bouncing Beam' => ['effect' => 'bouncingBeam', 'color' => '00FFFF', 'speed' => 100, 'tailLength' => 4, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '18 Split Tone' => ['effect' => 'splitTone', 'color1' => 'FFA500', 'color2' => '4B0082', 'speed' => 80, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '19 Gradient Flow' => ['effect' => 'gradientFlow', 'color1' => '32CD32', 'color2' => '0000FF', 'speed' => 70, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '20 Scanner Sweep' => ['effect' => 'scannerSweep', 'color' => '8B0000', 'speed' => 70, 'tailLength' => 5, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '21 Pulse Expand' => ['effect' => 'pulseExpand', 'color' => 'EE82EE', 'speed' => 110, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '22 Color Sequence' => ['effect' => 'colorSequence', 'colors' => 'FF0000,00FF00,0000FF', 'speed' => 800, 'repeatCount' => -1, 'durationSeconds' => 6],
+            '23 Running Lights' => ['effect' => 'runningLights', 'color' => '00FF00', 'speed' => 90, 'numDots' => 3, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '24 Spinner Glow' => ['effect' => 'spinnerGlow', 'color' => '20B2AA', 'speed' => 110, 'repeatCount' => -1, 'durationSeconds' => 5],
+            '25 Solid Red' => ['effect' => 'solidColor', 'color' => 'FF0000', 'repeatCount' => -1, 'durationSeconds' => 10],
+            '26 Solid Green' => ['effect' => 'solidColor', 'color' => '00FF00', 'repeatCount' => -1, 'durationSeconds' => 10],
+            '27 Solid Blue' => ['effect' => 'solidColor', 'color' => '0000FF', 'repeatCount' => -1, 'durationSeconds' => 10],
+        ];
+
+        $pos = 10;
+
+        foreach ($effects as $name => $payload) {
+
+            $script = IPS_CreateScript(0);
+            IPS_SetParent($script, $parentID);
+            IPS_SetName($script, $name);
+            IPS_SetPosition($script, $pos);
+
+            $json = json_encode($payload);
+
+            IPS_SetScriptContent($script,
+                "<?php\n\n" .
+                '$id = ' . $this->InstanceID . ";\n" .
+                '$payload = ' . var_export($json, true) . ";\n\n" .
+                "CRSXR_SetLEDRingEffectByPayload(\$id, \$payload);\n"
+            );
+
+            $pos += 10;
+        }
     }
 
     /**
@@ -1619,15 +1985,19 @@ class HaptiqueRemote extends IPSModuleStrict
                 'items' => [
                     [
                         'type' => 'Label',
-                        'caption' => $this->Translate('App-specific key assignments can be configured here later so Symcon can trigger matching actions depending on the currently active app.')
+                        'caption' => $this->Translate('App-specific key assignments can be configured here. Each app contains an embedded key list for all RS90 buttons.')
                     ],
                     [
                         'type' => 'List',
                         'name' => 'AppKeyAssignments',
                         'caption' => $this->Translate('App Key Assignments'),
                         'rowCount' => 8,
-                        'add' => true,
-                        'delete' => true,
+                        'add' => false,
+                        'delete' => false,
+                        'sort' => [
+                            'column' => 'app',
+                            'direction' => 'ascending'
+                        ],
                         'columns' => [
                             [
                                 'caption' => $this->Translate('App'),
@@ -1640,25 +2010,102 @@ class HaptiqueRemote extends IPSModuleStrict
                                 'width' => '320px'
                             ],
                             [
-                                'caption' => $this->Translate('Key'),
-                                'name' => 'key',
-                                'width' => '160px',
-                                'add' => '',
+                                'caption' => $this->Translate('Key Assignments'),
+                                'name' => 'keyMappings',
+                                'width' => '900px',
                                 'edit' => [
-                                    'type' => 'ValidationTextBox'
-                                ]
-                            ],
-                            [
-                                'caption' => $this->Translate('Action / Target'),
-                                'name' => 'action',
-                                'width' => 'auto',
-                                'add' => '',
-                                'edit' => [
-                                    'type' => 'ValidationTextBox'
+                                    'type' => 'List',
+                                    'name' => 'keyMappings',
+                                    'caption' => $this->Translate('Key Assignments'),
+                                    'rowCount' => 12,
+                                    'add' => false,
+                                    'delete' => false,
+                                    'sort' => [
+                                        'column' => 'key',
+                                        'direction' => 'ascending'
+                                    ],
+                                    'columns' => [
+                                        [
+                                            'caption' => $this->Translate('Key'),
+                                            'name' => 'key',
+                                            'width' => '180px'
+                                        ],
+                                        [
+                                            'caption' => $this->Translate('Variable'),
+                                            'name' => 'variableID',
+                                            'width' => '320px',
+                                            'edit' => [
+                                                'type' => 'SelectVariable',
+                                                'name' => 'variableID',
+                                                'caption' => $this->Translate('Variable')
+                                            ]
+                                        ],
+                                        [
+                                            'caption' => $this->Translate('Value'),
+                                            'name' => 'targetValue',
+                                            'width' => '180px',
+                                            'edit' => [
+                                                'type' => 'Select',
+                                                'name' => 'targetValue',
+                                                'caption' => $this->Translate('Value'),
+                                                'options' => $this->getGenericTargetValueOptions()
+                                            ]
+                                        ]
+                                    ]
                                 ]
                             ]
                         ],
                         'values' => $this->getAppKeyAssignmentFormValues()
+                    ]
+                ]
+            ],
+            [
+                'type' => 'ExpansionPanel',
+                'caption' => '📜 Skripte',
+                'items' => [
+                    [
+                        'type' => 'Label',
+                        'caption' => 'optionale Skriptte können bei Bedarf im Objektbaum erzeugt werden'
+                    ],
+                    [
+                        'type' => 'RowLayout',
+                        'items' => [
+                            [
+                                'type' => 'CheckBox',
+                                'name' => 'GenerateAppScripts',
+                                'caption' => 'Activate',
+                                'onChange' => 'CRSXR_GenerateAppScripts($id, $GenerateAppScripts, $AppScriptsCategoryID);'
+                            ],
+                            [
+                                'type' => 'SelectCategory',
+                                'name' => 'AppScriptsCategoryID',
+                                'caption' => 'Category'
+                            ],
+                            [
+                                'type' => 'Label',
+                                'caption' => 'App Skripte'
+                            ]
+                        ]
+                    ],
+                    [
+                        'type' => 'RowLayout',
+                        'items' => [
+                            [
+                                'type' => 'CheckBox',
+                                'name' => 'GenerateLEDScripts',
+                                'caption' => 'Activate',
+                                'onChange' => 'CRSXR_GenerateLEDScripts($id, $GenerateLEDScripts, $LEDScriptsCategoryID);'
+                            ],
+                            [
+                                'type' => 'SelectCategory',
+                                'name' => 'LEDScriptsCategoryID',
+                                'caption' => 'Category'
+                            ],
+                            [
+                                'type' => 'Label',
+                                'caption' => 'LED Effekte'
+                            ]
+                        ]
                     ]
                 ]
             ],

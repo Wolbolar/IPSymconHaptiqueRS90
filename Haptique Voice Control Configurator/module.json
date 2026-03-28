@@ -1,0 +1,18 @@
+{
+    "id": "{F8CE1316-DE4F-70C0-0F91-B8A41E606B59}",
+    "name": "Haptique Voice Control Configurator",
+    "type": 4,
+    "vendor": "Cantata",
+    "aliases": [
+        "Cantata RS90 Voice Control Configurator"
+    ],
+    "parentRequirements": [
+        "{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}"
+    ],
+    "childRequirements": [],
+    "implemented": [
+        "{7F7632D9-FA40-4F38-8DEA-C83CD4325A32}"
+    ],
+    "prefix": "CRSVC",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

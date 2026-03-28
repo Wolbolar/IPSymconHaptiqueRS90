@@ -1,0 +1,14 @@
+{
+    "id": "{E7C45531-9FF1-22E6-9085-4ACB08FD4353}",
+    "name": "Haptique Setup Configurator",
+    "type": 4,
+    "vendor": "Cantata",
+    "aliases": [
+        "Cantata RS90 Setup Configurator"
+    ],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "CRSSC",
+    "url": "https://www.cantatacs.com/haptique-rs90x"
+}

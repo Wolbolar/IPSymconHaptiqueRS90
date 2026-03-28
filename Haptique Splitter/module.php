@@ -129,7 +129,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $user = trim($this->ReadPropertyString('RS90_User'));
         $password = (string) $this->ReadPropertyString('RS90_Password');
 
-        $this->SendDebug(__FUNCTION__, 'Starting login for user: ' . $user . ' | password length: ' . strlen($password), 0);
+        $this->DebugLog(__FUNCTION__, 'Starting login for user: ' . $user . ' | password length: ' . strlen($password), 0);
 
         if ($user === '' || $password === '') {
             $message = 'RS90 login failed: user or password is empty';
@@ -137,7 +137,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return 'ERROR: ' . $message;
         }
 
@@ -171,15 +171,15 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return 'ERROR: ' . $message;
         }
 
         $header = substr($response, 0, $headerSize);
         $body = substr($response, $headerSize);
 
-        $this->SendDebug(__FUNCTION__, 'HTTP Code: ' . $httpCode, 0);
-        $this->SendDebug(__FUNCTION__, 'Header length: ' . strlen($header) . ' | Body length: ' . strlen($body), 0);
+        $this->DebugLog(__FUNCTION__, 'HTTP Code: ' . $httpCode, 0);
+        $this->DebugLog(__FUNCTION__, 'Header length: ' . strlen($header) . ' | Body length: ' . strlen($body), 0);
 
         $data = json_decode($body, true);
         if (!is_array($data)) {
@@ -188,7 +188,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message . ' | body: ' . $body, 0);
+            $this->DebugLog(__FUNCTION__, $message . ' | body: ' . $body, 0);
             return 'ERROR: ' . $message;
         }
 
@@ -199,7 +199,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return 'ERROR: ' . $message;
         }
 
@@ -210,7 +210,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return 'ERROR: ' . $message;
         }
 
@@ -223,7 +223,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $this->WriteAttributeString('RS90_Cookie', '');
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return 'ERROR: ' . $message;
         }
 
@@ -232,7 +232,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $this->WriteAttributeBoolean('RS90_LoginFailed', false);
         $this->WriteAttributeString('RS90_LastError', '');
 
-        $this->SendDebug(__FUNCTION__, 'RS90 login successful | token length: ' . strlen($token) . ' | cookie length: ' . strlen($cookie), 0);
+        $this->DebugLog(__FUNCTION__, 'RS90 login successful | token length: ' . strlen($token) . ' | cookie length: ' . strlen($cookie), 0);
         return $token;
     }
 
@@ -257,16 +257,16 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         $payload = ['id' => $deviceId];
-        $this->SendDebug(__FUNCTION__ . ' Payload', json_encode($payload), 0);
+        $this->DebugLog(__FUNCTION__ . ' Payload', json_encode($payload), 0);
 
         // Ensure we have a valid RS90 session
         $accessToken = trim($this->ReadAttributeString('RS90_AccessToken'));
         $cookie = trim($this->ReadAttributeString('RS90_Cookie'));
 
         if ($accessToken === '' || $cookie === '') {
-            $this->SendDebug(__FUNCTION__, 'RS90 session missing -> calling RS90_Login()', 0);
+            $this->DebugLog(__FUNCTION__, 'RS90 session missing -> calling RS90_Login()', 0);
             $loginResult = $this->RS90_Login();
-            $this->SendDebug(__FUNCTION__, 'RS90_Login() result: ' . $loginResult, 0);
+            $this->DebugLog(__FUNCTION__, 'RS90_Login() result: ' . $loginResult, 0);
         }
 
         // First attempt
@@ -276,9 +276,9 @@ class HaptiqueSplitter extends IPSModuleStrict
         if (is_array($result) && isset($result['success']) && $result['success'] === false) {
             $msg = (string)($result['message'] ?? '');
             if ($msg !== '' && stripos($msg, 'token') !== false) {
-                $this->SendDebug(__FUNCTION__, 'Cantata API returned token-related error -> re-login and retry', 0);
+                $this->DebugLog(__FUNCTION__, 'Cantata API returned token-related error -> re-login and retry', 0);
                 $loginResult = $this->RS90_Login();
-                $this->SendDebug(__FUNCTION__, 'RS90_Login() result (retry): ' . $loginResult, 0);
+                $this->DebugLog(__FUNCTION__, 'RS90_Login() result (retry): ' . $loginResult, 0);
                 $result = $this->CallCantataAPI('/app/device/remove', $payload);
             }
         }
@@ -302,7 +302,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $data = $result['data'] ?? ($result['Data'] ?? $result);
         $message = (string)($result['message'] ?? ($result['Message'] ?? ''));
 
-        $this->SendDebug(__FUNCTION__ . ' Result', json_encode($result), 0);
+        $this->DebugLog(__FUNCTION__ . ' Result', json_encode($result), 0);
 
         return [
             'Success' => $success,
@@ -317,16 +317,16 @@ class HaptiqueSplitter extends IPSModuleStrict
         // - Property "Token" in this module is used for webhook/auth in the local emulator context.
         // - Cantata Cloud endpoints require the RS90 session (RS90_AccessToken + RS90_Cookie) obtained via RS90_Login().
 
-        $this->SendDebug(__FUNCTION__ . ' Payload', json_encode($devicePayload), 0);
+        $this->DebugLog(__FUNCTION__ . ' Payload', json_encode($devicePayload), 0);
 
         // Ensure we have a valid RS90 session
         $accessToken = trim($this->ReadAttributeString('RS90_AccessToken'));
         $cookie = trim($this->ReadAttributeString('RS90_Cookie'));
 
         if ($accessToken === '' || $cookie === '') {
-            $this->SendDebug(__FUNCTION__, 'RS90 session missing -> calling RS90_Login()', 0);
+            $this->DebugLog(__FUNCTION__, 'RS90 session missing -> calling RS90_Login()', 0);
             $loginResult = $this->RS90_Login();
-            $this->SendDebug(__FUNCTION__, 'RS90_Login() result: ' . $loginResult, 0);
+            $this->DebugLog(__FUNCTION__, 'RS90_Login() result: ' . $loginResult, 0);
         }
 
         // First attempt
@@ -336,9 +336,9 @@ class HaptiqueSplitter extends IPSModuleStrict
         if (is_array($result) && isset($result['success']) && $result['success'] === false) {
             $msg = (string)($result['message'] ?? '');
             if ($msg !== '' && stripos($msg, 'token') !== false) {
-                $this->SendDebug(__FUNCTION__, 'Cantata API returned token-related error -> re-login and retry', 0);
+                $this->DebugLog(__FUNCTION__, 'Cantata API returned token-related error -> re-login and retry', 0);
                 $loginResult = $this->RS90_Login();
-                $this->SendDebug(__FUNCTION__, 'RS90_Login() result (retry): ' . $loginResult, 0);
+                $this->DebugLog(__FUNCTION__, 'RS90_Login() result (retry): ' . $loginResult, 0);
                 $result = $this->CallCantataAPI('/app/integration/custom-urls/store', $devicePayload);
             }
         }
@@ -362,7 +362,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $data = $result['data'] ?? ($result['Data'] ?? $result);
         $message = (string)($result['message'] ?? ($result['Message'] ?? ''));
 
-        $this->SendDebug(__FUNCTION__ . ' Result', json_encode($result), 0);
+        $this->DebugLog(__FUNCTION__ . ' Result', json_encode($result), 0);
 
         return [
             'Success' => $success,
@@ -399,10 +399,10 @@ class HaptiqueSplitter extends IPSModuleStrict
         $cookie = trim($this->ReadAttributeString('RS90_Cookie'));
 
         if ($token === '' || $cookie === '') {
-            $this->SendDebug(__FUNCTION__, 'Missing RS90 token/cookie before API call -> trying RS90_Login()', 0);
+            $this->DebugLog(__FUNCTION__, 'Missing RS90 token/cookie before API call -> trying RS90_Login()', 0);
             $loginResult = $this->RS90_Login();
             if (strpos($loginResult, 'ERROR:') === 0) {
-                $this->SendDebug(__FUNCTION__, 'API call aborted because login failed: ' . $loginResult, 0);
+                $this->DebugLog(__FUNCTION__, 'API call aborted because login failed: ' . $loginResult, 0);
                 return null;
             }
             $token = trim($this->ReadAttributeString('RS90_AccessToken'));
@@ -410,7 +410,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         $url = self::BASE_URL . $endpoint;
-        $this->SendDebug(__FUNCTION__, 'Calling endpoint: ' . $endpoint . ' | payload: ' . json_encode($postData), 0);
+        $this->DebugLog(__FUNCTION__, 'Calling endpoint: ' . $endpoint . ' | payload: ' . json_encode($postData), 0);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -435,19 +435,19 @@ class HaptiqueSplitter extends IPSModuleStrict
             $message = 'Cantata API cURL error for ' . $endpoint . ': ' . $error;
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return null;
         }
 
-        $this->SendDebug(__FUNCTION__, 'HTTP Code: ' . $httpCode . ' | Response length: ' . strlen($response), 0);
-        $this->SendDebug(__FUNCTION__, 'Response: ' . $response, 0);
+        $this->DebugLog(__FUNCTION__, 'HTTP Code: ' . $httpCode . ' | Response length: ' . strlen($response), 0);
+        $this->DebugLog(__FUNCTION__, 'Response: ' . $response, 0);
 
         $data = json_decode($response, true);
         if (!is_array($data)) {
             $message = 'Cantata API invalid JSON response for ' . $endpoint;
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return null;
         }
 
@@ -456,7 +456,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $message = 'Cantata API call failed for ' . $endpoint . ': HTTP ' . $httpCode . ' - ' . $apiMessage;
             $this->WriteAttributeBoolean('RS90_LoginFailed', true);
             $this->WriteAttributeString('RS90_LastError', $message);
-            $this->SendDebug(__FUNCTION__, $message, 0);
+            $this->DebugLog(__FUNCTION__, $message, 0);
             return $data;
         }
 
@@ -531,7 +531,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     public function RefreshConfigurationData(): void
     {
-        $this->SendDebug(__FUNCTION__, 'Manual refresh of RS90 configuration data started', 0);
+        $this->DebugLog(__FUNCTION__, 'Manual refresh of RS90 configuration data started', 0);
 
         $sequences = $this->GetFormCompatibleSequences();
         $rooms = $this->RS90_GetRoomsFormatted();
@@ -551,12 +551,12 @@ class HaptiqueSplitter extends IPSModuleStrict
             }
             @$this->UpdateFormField('RS90LoginWarning', 'visible', true);
             @$this->UpdateFormField('RS90LoginWarning', 'caption', $warning);
-            $this->SendDebug(__FUNCTION__, $warning, 0);
+            $this->DebugLog(__FUNCTION__, $warning, 0);
         } else {
             @$this->UpdateFormField('RS90LoginWarning', 'visible', false);
         }
 
-        $this->SendDebug(__FUNCTION__, 'Manual refresh of RS90 configuration data finished', 0);
+        $this->DebugLog(__FUNCTION__, 'Manual refresh of RS90 configuration data finished', 0);
     }
 
 
@@ -647,12 +647,12 @@ class HaptiqueSplitter extends IPSModuleStrict
         curl_close($ch);
 
         if ($response === false) {
-            $this->SendDebug("RS90 HTTP Error", $error, 0);
+            $this->DebugLog("RS90 HTTP Error", $error, 0);
             return "ERROR: " . $error;
         }
 
-        $this->SendDebug("RS90 HTTP Response Code", $httpCode, 0);
-        $this->SendDebug("RS90 HTTP Response", $response, 0);
+        $this->DebugLog("RS90 HTTP Response Code", $httpCode, 0);
+        $this->DebugLog("RS90 HTTP Response", $response, 0);
         return $response;
     }
 
@@ -663,7 +663,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     public function RGBTurnOff(): string
     {
         $result = $this->SendCommandToRS90("turnoff");
-        $this->SendDebug("TurnOff", $result, 0);
+        $this->DebugLog("TurnOff", $result, 0);
         return $result;
     }
 
@@ -737,7 +737,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     public function Destroy(): void
     {
         // Debug-Information zur Überprüfung, dass Destroy aufgerufen wird
-        $this->SendDebug('Destroy', 'Destroy-Methode wird aufgerufen', 0);
+        $this->DebugLog('Destroy', 'Destroy-Methode wird aufgerufen', 0);
 
         // Webhook löschen, falls dieser existiert
         $this->UnregisterHook('cantata');
@@ -764,17 +764,17 @@ class HaptiqueSplitter extends IPSModuleStrict
         parent::MessageSink($TimeStamp, $SenderID, $Message, $Data);
 
         if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
-            $this->SendDebug(__FUNCTION__, '✅ Kernel READY – send Initial-Events', 0);
+            $this->DebugLog(__FUNCTION__, '✅ Kernel READY – send Initial-Events', 0);
             $this->RegisterHook('cantata');
             $this->RegisterMdnsService();
         }
 
         if ($Message == IPS_KERNELSTARTED) {
-            $this->SendDebug(__FUNCTION__, "🔄 Kernel Started", 0);
+            $this->DebugLog(__FUNCTION__, "🔄 Kernel Started", 0);
         }
 
         if ($Message == IM_CHANGESTATUS && $Data[0] == IS_ACTIVE) {
-            $this->SendDebug(__FUNCTION__, "🔄 Instanz aktiv", 0);
+            $this->DebugLog(__FUNCTION__, "🔄 Instanz aktiv", 0);
         }
     }
 
@@ -794,7 +794,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             ];
 
             // Debug-Nachricht
-            $this->SendDebug('API Command', 'Sende API-Befehl: ' . $apiCommand . ' mit Wert: ' . $value . ' an ' . $clientIP . ':' . $clientPort, 0);
+            $this->DebugLog('API Command', 'Sende API-Befehl: ' . $apiCommand . ' mit Wert: ' . $value . ' an ' . $clientIP . ':' . $clientPort, 0);
 
             // JSON-Daten an den Parent (Socket) senden
             /*
@@ -807,24 +807,24 @@ class HaptiqueSplitter extends IPSModuleStrict
 
                 // Ergebnis prüfen
                 if ($result === false) {
-                    $this->SendDebug('API Send Error', 'Fehler beim Senden des API-Befehls', 0);
+                    $this->DebugLog('API Send Error', 'Fehler beim Senden des API-Befehls', 0);
                 } else {
-                    $this->SendDebug('API Command Sent', 'Befehl erfolgreich gesendet: ' . $apiCommand, 0);
+                    $this->DebugLog('API Command Sent', 'Befehl erfolgreich gesendet: ' . $apiCommand, 0);
                 }
                 */
         } else {
-            $this->SendDebug('Socket Error', 'Kein gültiger Client IP/Port konfiguriert', 0);
+            $this->DebugLog('Socket Error', 'Kein gültiger Client IP/Port konfiguriert', 0);
         }
     }
 
     public function ForwardData($JSONString): string
     {
         $data = json_decode($JSONString, true);
-        $this->SendDebug(__FUNCTION__, 'ForwardData raw: ' . $JSONString, 0);
+        $this->DebugLog(__FUNCTION__, 'ForwardData raw: ' . $JSONString, 0);
 
         if (!is_array($data)) {
             $err = 'Invalid JSON in ForwardData: ' . json_last_error_msg();
-            $this->SendDebug(__FUNCTION__, $err, 0);
+            $this->DebugLog(__FUNCTION__, $err, 0);
             return json_encode(['Success' => false, 'Error' => $err]);
         }
 
@@ -845,11 +845,11 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         if (!is_array($payload)) {
-            $this->SendDebug(__FUNCTION__, 'Payload fehlt/ungültig', 0);
+            $this->DebugLog(__FUNCTION__, 'Payload fehlt/ungültig', 0);
             return json_encode(['Success' => false, 'Error' => 'Payload fehlt/ungültig']);
         }
 
-        $this->SendDebug(__FUNCTION__, 'Payload: ' . json_encode($payload), 0);
+        $this->DebugLog(__FUNCTION__, 'Payload: ' . json_encode($payload), 0);
 
         // ------------------------------------------------------------
         // 1) RPC-Kommandos vom Konfigurator
@@ -870,7 +870,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 case 'GetToken':
                     $token = $this->ReadPropertyString('Token');
 
-                    $this->SendDebug(__FUNCTION__, 'Returning Token: ' . $token, 0);
+                    $this->DebugLog(__FUNCTION__, 'Returning Token: ' . $token, 0);
 
                     return json_encode([
                         'Token' => $token
@@ -907,7 +907,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                     return json_encode(['Success' => true, 'Data' => $result]);
 
                 default:
-                    $this->SendDebug(__FUNCTION__, 'Unknown RPC Command: ' . $cmd, 0);
+                    $this->DebugLog(__FUNCTION__, 'Unknown RPC Command: ' . $cmd, 0);
                     return json_encode(['Success' => false, 'Error' => 'Unknown RPC Command: ' . $cmd]);
             }
         }
@@ -927,11 +927,11 @@ class HaptiqueSplitter extends IPSModuleStrict
                         return json_encode(['Success' => false, 'Error' => 'TreeData fehlt']);
                     }
                     $this->WriteAttributeString("previousTree", (string)$payload['TreeData']);
-                    $this->SendDebug(__FUNCTION__, 'Vorheriger Tree gespeichert', 0);
+                    $this->DebugLog(__FUNCTION__, 'Vorheriger Tree gespeichert', 0);
                     return json_encode(['Success' => true]);
 
                 default:
-                    $this->SendDebug(__FUNCTION__, 'Unknown Action: ' . $payload['Action'], 0);
+                    $this->DebugLog(__FUNCTION__, 'Unknown Action: ' . $payload['Action'], 0);
                     return json_encode(['Success' => false, 'Error' => 'Unknown Action: ' . $payload['Action']]);
             }
         }
@@ -949,15 +949,15 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     public function ReceiveData($JSONString): string
     {
-        $this->SendDebugExtended(__FUNCTION__, '📥 Raw Data: ' . $JSONString, 0);
+        $this->DebugExtended(__FUNCTION__, '📥 Raw Data: ' . $JSONString, 0);
 
         $data = json_decode($JSONString, true);
         if (!is_array($data)) {
-            $this->SendDebugExtended(__FUNCTION__, '❌ JSON-Parsing fehlgeschlagen: ' . json_last_error_msg(), 0);
-            $this->SendDebugExtended(__FUNCTION__, '📥 Ursprünglicher JSON-String: ' . $JSONString, 0);
+            $this->DebugExtended(__FUNCTION__, '❌ JSON-Parsing fehlgeschlagen: ' . json_last_error_msg(), 0);
+            $this->DebugExtended(__FUNCTION__, '📥 Ursprünglicher JSON-String: ' . $JSONString, 0);
             return '';
         }
-        $this->SendDebugExtended(__FUNCTION__, '✅ JSON erfolgreich dekodiert', 0);
+        $this->DebugExtended(__FUNCTION__, '✅ JSON erfolgreich dekodiert', 0);
 
         if (mb_check_encoding($data['Buffer'], 'UTF-8')) {
             // Umwandeln in 1-Byte-Encoding für substr/ord/etc.
@@ -970,16 +970,16 @@ class HaptiqueSplitter extends IPSModuleStrict
         $type = intval($data['Type'] ?? -1);
         switch ($type) {
             case self::Socket_Data: // Data
-                $this->SendDebugExtended(__FUNCTION__, "🟢 WebSocket Type: Data", 0);
+                $this->DebugExtended(__FUNCTION__, "🟢 WebSocket Type: Data", 0);
                 break;
             case self::Socket_Connected: // Connected
-                $this->SendDebugExtended(__FUNCTION__, "🟢 WebSocket Type: Connected", 0);
+                $this->DebugExtended(__FUNCTION__, "🟢 WebSocket Type: Connected", 0);
                 break;
             case self::Socket_Disconnected: // Disconnected
-                $this->SendDebugExtended(__FUNCTION__, "🟠 WebSocket Type: Disconnected", 0);
+                $this->DebugExtended(__FUNCTION__, "🟠 WebSocket Type: Disconnected", 0);
                 break;
             default:
-                $this->SendDebugExtended(__FUNCTION__, "⚠️ WebSocket Type: Unbekannt ($type)", 0);
+                $this->DebugExtended(__FUNCTION__, "⚠️ WebSocket Type: Unbekannt ($type)", 0);
                 break;
         }
 
@@ -999,19 +999,24 @@ class HaptiqueSplitter extends IPSModuleStrict
         return '';
     }
 
-    private function SendDebugExtended(string $function, string $message, int $format): void
+    private function DebugLog(string $message, $data, int $format = 0, int $level = self::LV_INFO, string $topic = self::TOPIC_GEN): void
+    {
+        $this->Debug($message, $level, $topic, $data, $format);
+    }
+
+    private function DebugExtended(string $message, $data, int $format = 0, int $level = self::LV_TRACE, string $topic = self::TOPIC_EXT): void
     {
         if ($this->ReadPropertyBoolean('extended_debug')) {
-            $this->SendDebug($function, $message, $format);
+            $this->Debug($message, $level, $topic, $data, $format);
         }
     }
 
     public function ProcessHookData(): void
     {
-        $this->SendDebug(__FUNCTION__, 'Hook wurde aufgerufen', 0);
+        $this->DebugLog(__FUNCTION__, 'Hook wurde aufgerufen', 0);
         // Methode und Anfrage-Art auslesen
         $method = $_SERVER['REQUEST_METHOD'];
-        $this->SendDebug('ProcessHookData', 'Empfangene Methode: ' . $method, 0);
+        $this->DebugLog('ProcessHookData', 'Empfangene Methode: ' . $method, 0);
 
         // Prüfe den Token: Erst im Header, dann als URL-Parameter
         $token = '';
@@ -1027,11 +1032,11 @@ class HaptiqueSplitter extends IPSModuleStrict
             $token = $_GET['token'];  // Falls kein Header-Token, Token aus der URL nehmen
         }
 
-        $this->SendDebug(__FUNCTION__, "Empfangener Token: $token", 0);
+        $this->DebugLog(__FUNCTION__, "Empfangener Token: $token", 0);
 
         // Vergleiche den Token mit dem gespeicherten
         if ($token !== $this->ReadPropertyString('Token')) {
-            $this->SendDebug(__FUNCTION__, 'Ungültiger Token: ' . $token, 0);
+            $this->DebugLog(__FUNCTION__, 'Ungültiger Token: ' . $token, 0);
             header('HTTP/1.1 401 Unauthorized');
             echo json_encode(['error' => 'Unauthorized: Invalid Token']);
             return;
@@ -1042,12 +1047,12 @@ class HaptiqueSplitter extends IPSModuleStrict
             $data = file_get_contents('php://input');
             $json = json_decode($data, true);
             // Debug-Ausgabe nach JSON-Decode
-            $this->SendDebug('Cantata JSON', print_r($json, true), 0);
-            $this->SendDebug('Cantata Webhook (POST)', json_encode($json), 0);
+            $this->DebugLog('Cantata JSON', print_r($json, true), 0);
+            $this->DebugLog('Cantata Webhook (POST)', json_encode($json), 0);
 
             // Prüfen der übermittelten Parameter (action, device_id, state)
             if (isset($json['action'])) {
-                $this->SendDebug('Cantata Webhook', 'Action: ' . $json['action'], 0);
+                $this->DebugLog('Cantata Webhook', 'Action: ' . $json['action'], 0);
 
                 $action = $json['action'];
                 // Batteriestatus-Bedingung
@@ -1057,7 +1062,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                         'DeviceID' => $json['device_id'] ?? '',
                         'Battery' => $battery
                     ];
-                    $this->SendDebug('Received Battery', json_encode($status), 0);
+                    $this->DebugLog('Received Battery', json_encode($status), 0);
                     $this->SendDataToChildren(json_encode([
                         'DataID' => '{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}',
                         'Buffer' => $status
@@ -1066,7 +1071,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 }
                 // Tastendruck-Bedingung
                 if ($action === 'keypress') {
-                    $this->SendDebug('Keypress', json_encode($json), 0);
+                    $this->DebugLog('Keypress', json_encode($json), 0);
                     $this->SendDataToChildren(json_encode([
                         'DataID' => '{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}', // ID der Child-Instanz
                         'Buffer' => [
@@ -1078,26 +1083,26 @@ class HaptiqueSplitter extends IPSModuleStrict
                     return;
                 }
             } else {
-                $this->SendDebug('Cantata Webhook', 'Keine Action übermittelt', 0);
+                $this->DebugLog('Cantata Webhook', 'Keine Action übermittelt', 0);
             }
 
             if (isset($json['device_id'])) {
-                $this->SendDebug('Cantata Webhook', 'Device ID: ' . $json['device_id'], 0);
+                $this->DebugLog('Cantata Webhook', 'Device ID: ' . $json['device_id'], 0);
             } else {
-                $this->SendDebug('Cantata Webhook', 'Keine Device ID übermittelt', 0);
+                $this->DebugLog('Cantata Webhook', 'Keine Device ID übermittelt', 0);
             }
 
             if (isset($json['state'])) {
-                $this->SendDebug('Cantata Webhook', 'State: ' . $json['state'], 0);
+                $this->DebugLog('Cantata Webhook', 'State: ' . $json['state'], 0);
             } else {
-                $this->SendDebug('Cantata Webhook', 'Kein State übermittelt', 0);
+                $this->DebugLog('Cantata Webhook', 'Kein State übermittelt', 0);
             }
 
             if (isset($json['scene_id'], $json['button'])) {
                 $sceneID = intval($json['scene_id']);
                 $button = $json['button'];
 
-                $this->SendDebug(__FUNCTION__, "Scene-Befehl empfangen: SceneID=$sceneID, Button=$button", 0);
+                $this->DebugLog(__FUNCTION__, "Scene-Befehl empfangen: SceneID=$sceneID, Button=$button", 0);
 
                 // Daten an die Child-Instanzen weiterleiten
                 $this->SendDataToChildren(json_encode([
@@ -1110,21 +1115,21 @@ class HaptiqueSplitter extends IPSModuleStrict
                 echo json_encode(['message' => 'Scene command processed']);
                 return;
             } else {
-                $this->SendDebug(__FUNCTION__, 'Ungültige POST-Daten', 0);
+                $this->DebugLog(__FUNCTION__, 'Ungültige POST-Daten', 0);
                 header('HTTP/1.1 400 Bad Request');
                 echo json_encode(['error' => 'Bad Request']);
             }
         } elseif ($method === 'GET') {
-            $this->SendDebug('Cantata Webhook (GET)', 'HTML-Ausgabe für Cantata', 0);
+            $this->DebugLog('Cantata Webhook (GET)', 'HTML-Ausgabe für Cantata', 0);
 
             // Alle GET-Parameter auswerten und debuggen
             foreach ($_GET as $key => $value) {
-                $this->SendDebug('Cantata Webhook (GET)', "Parameter: $key = $value", 0);
+                $this->DebugLog('Cantata Webhook (GET)', "Parameter: $key = $value", 0);
             }
 
             // IGNORE-Befehl abfangen
             if (isset($_GET['command']) && $_GET['command'] === 'ignore') {
-                $this->SendDebug(__FUNCTION__, 'IGNORE-Befehl empfangen. Keine Verarbeitung erforderlich.', 0);
+                $this->DebugLog(__FUNCTION__, 'IGNORE-Befehl empfangen. Keine Verarbeitung erforderlich.', 0);
 
                 // Antwort zurückgeben
                 header('Content-Type: application/json');
@@ -1138,7 +1143,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 $button = $_GET['button'];
 
                 if ($sceneID > 0 && !empty($button)) {
-                    $this->SendDebug(__FUNCTION__, "Szenen-Befehl erkannt: SceneID=$sceneID, Button=$button", 0);
+                    $this->DebugLog(__FUNCTION__, "Szenen-Befehl erkannt: SceneID=$sceneID, Button=$button", 0);
 
                     // Daten an die Child-Instanzen weiterleiten
                     $this->SendDataToChildren(json_encode([
@@ -1151,7 +1156,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                     echo json_encode(['message' => 'Scene command processed']);
                     return;
                 } else {
-                    $this->SendDebug(__FUNCTION__, "Ungültige Szenen-Parameter: SceneID=$sceneID, Button=$button", 0);
+                    $this->DebugLog(__FUNCTION__, "Ungültige Szenen-Parameter: SceneID=$sceneID, Button=$button", 0);
                     header('HTTP/1.1 400 Bad Request');
                     echo json_encode(['error' => 'Invalid scene parameters']);
                     return;
@@ -1164,7 +1169,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 $instanceId = intval($_GET['instance_id']);
                 $deviceCategory = $_GET['device_category'];
 
-                $this->SendDebug(__FUNCTION__, "Command erkannt: Command=$command, InstanceID=$instanceId, DeviceCategory=$deviceCategory", 0);
+                $this->DebugLog(__FUNCTION__, "Command erkannt: Command=$command, InstanceID=$instanceId, DeviceCategory=$deviceCategory", 0);
 
                 // Command ausführen
                 $response = $this->ExecuteCommandByInstance($instanceId, $command, $deviceCategory);
@@ -1176,7 +1181,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             }
 
             // Ungültige Parameter
-            $this->SendDebug(__FUNCTION__, 'Ungültige Parameter', 0);
+            $this->DebugLog(__FUNCTION__, 'Ungültige Parameter', 0);
             header('HTTP/1.1 400 Bad Request');
             echo json_encode(['error' => 'Invalid parameters']);
         }
@@ -1184,23 +1189,23 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function ExecuteCommandByInstance($instanceId, $command, $deviceCategory)
     {
-        $this->SendDebug(__FUNCTION__, "Aufruf mit InstanceID=$instanceId, Command=$command, DeviceCategory=$deviceCategory", 0);
+        $this->DebugLog(__FUNCTION__, "Aufruf mit InstanceID=$instanceId, Command=$command, DeviceCategory=$deviceCategory", 0);
 
         if ($deviceCategory === 'script') {
             // Prüfe, ob die Instanz-ID existiert und ein Skript ist
             if (IPS_ObjectExists($instanceId) && IPS_GetObject($instanceId)['ObjectType'] == 3) { // 3 steht für Skript
-                $this->SendDebug(__FUNCTION__, "Skript erkannt. Ausführung starten für Objekt-ID: $instanceId", 0);
+                $this->DebugLog(__FUNCTION__, "Skript erkannt. Ausführung starten für Objekt-ID: $instanceId", 0);
                 try {
                     // Skript ausführen
                     IPS_RunScript($instanceId);
-                    $this->SendDebug(__FUNCTION__, "Skript erfolgreich ausgeführt: Objekt-ID $instanceId", 0);
+                    $this->DebugLog(__FUNCTION__, "Skript erfolgreich ausgeführt: Objekt-ID $instanceId", 0);
                     return ['message' => "Skript erfolgreich ausgeführt: Objekt-ID $instanceId"];
                 } catch (Exception $e) {
-                    $this->SendDebug(__FUNCTION__, "Fehler beim Ausführen des Skripts: " . $e->getMessage(), 0);
+                    $this->DebugLog(__FUNCTION__, "Fehler beim Ausführen des Skripts: " . $e->getMessage(), 0);
                     return ['error' => "Fehler beim Ausführen des Skripts: " . $e->getMessage()];
                 }
             } else {
-                $this->SendDebug(__FUNCTION__, "Ungültige Objekt-ID oder Objekt ist kein Skript: $instanceId", 0);
+                $this->DebugLog(__FUNCTION__, "Ungültige Objekt-ID oder Objekt ist kein Skript: $instanceId", 0);
                 return ['error' => "Ungültige Objekt-ID oder Objekt ist kein Skript: $instanceId"];
             }
         }
@@ -1208,24 +1213,24 @@ class HaptiqueSplitter extends IPSModuleStrict
         // === Kincony Device Support ===
         if ($deviceCategory === 'kinconydevice') {
             if (!IPS_ObjectExists($instanceId)) {
-                $this->SendDebug(__FUNCTION__, "Kincony: Ungültige InstanceID $instanceId", 0);
+                $this->DebugLog(__FUNCTION__, "Kincony: Ungültige InstanceID $instanceId", 0);
                 return ['error' => "Kincony InstanceID '$instanceId' nicht gefunden"];
             }
 
             try {
-                $this->SendDebug(__FUNCTION__, "Kincony: Sende Befehl '$command' an InstanceID $instanceId", 0);
+                $this->DebugLog(__FUNCTION__, "Kincony: Sende Befehl '$command' an InstanceID $instanceId", 0);
 
                 // Aufruf des Kincony-Moduls
                 if (function_exists('CRSXKD_SendCommandByName')) {
                     CRSXKD_SendCommandByName($instanceId, $command);
                 } else {
-                    $this->SendDebug(__FUNCTION__, "Kincony-Funktion CRSXKD_SendCommandByName nicht gefunden", 0);
+                    $this->DebugLog(__FUNCTION__, "Kincony-Funktion CRSXKD_SendCommandByName nicht gefunden", 0);
                     return ['error' => "CRSXKD_SendCommandByName nicht verfügbar"];
                 }
 
                 return ['message' => "Kincony-Befehl '$command' erfolgreich für Instanz '$instanceId' ausgeführt"];
             } catch (Exception $e) {
-                $this->SendDebug(__FUNCTION__, "Fehler bei Kincony-Befehl: " . $e->getMessage(), 0);
+                $this->DebugLog(__FUNCTION__, "Fehler bei Kincony-Befehl: " . $e->getMessage(), 0);
                 return ['error' => "Fehler bei Kincony-Befehl: " . $e->getMessage()];
             }
         }
@@ -1244,7 +1249,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         if ($targetDevice === null) {
-            $this->SendDebug('ExecuteCommandByInstance', "Unbekannte Instanz-ID: $instanceId", 0);
+            $this->DebugLog('ExecuteCommandByInstance', "Unbekannte Instanz-ID: $instanceId", 0);
             return ['error' => "Instanz-ID '$instanceId' nicht gefunden"];
         }
 
@@ -1272,7 +1277,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 }
 
                 if ($matchedCommand !== null) {
-                    $this->SendDebug('ExecuteCommandByInstance', "Harmony-Befehl ausführen: $matchedCommand für Instanz-ID: $instanceId", 0);
+                    $this->DebugLog('ExecuteCommandByInstance', "Harmony-Befehl ausführen: $matchedCommand für Instanz-ID: $instanceId", 0);
                     LHD_Send($instanceId, $matchedCommand); // Harmony-Befehl senden
                     return ['message' => "Befehl '$nextCommand' erfolgreich für Logitech Harmony Instanz '$instanceId' ausgeführt"];
                 } else {
@@ -1287,18 +1292,18 @@ class HaptiqueSplitter extends IPSModuleStrict
                 foreach ($harmonyCommands as $harmonyCommand) {
                     if (strcasecmp($harmonyCommand['label'], $command) === 0) {
                         $matchedCommand = $harmonyCommand['command'];
-                        $this->SendDebug('Harmony Command found', $matchedCommand, 0);
+                        $this->DebugLog('Harmony Command found', $matchedCommand, 0);
                         break;
                     }
                 }
 
                 if ($matchedCommand !== null) {
                     // Führt den Harmony-Befehl aus
-                    $this->SendDebug('ExecuteCommandByInstance', "Harmony-Befehl ausführen: $matchedCommand für Instanz-ID: $instanceId", 0);
+                    $this->DebugLog('ExecuteCommandByInstance', "Harmony-Befehl ausführen: $matchedCommand für Instanz-ID: $instanceId", 0);
                     LHD_Send($instanceId, $matchedCommand); // Logitech-Befehl senden
                     return ['message' => "Befehl '$command' erfolgreich für Logitech Harmony Instanz '$instanceId' ausgeführt"];
                 } else {
-                    $this->SendDebug('ExecuteCommandByInstance', "Unbekannter Harmony-Befehl: $command für Instanz-ID: $instanceId", 0);
+                    $this->DebugLog('ExecuteCommandByInstance', "Unbekannter Harmony-Befehl: $command für Instanz-ID: $instanceId", 0);
                     return ['error' => "Unbekannter Befehl '$command' für Logitech Harmony Instanz '$instanceId'"];
                 }
             }
@@ -1369,11 +1374,11 @@ class HaptiqueSplitter extends IPSModuleStrict
     private function processReceivedData($data)
     {
         // Beispiel für Debugging und Verarbeitung
-        $this->SendDebug('Process Data', $data, 0);
+        $this->DebugLog('Process Data', $data, 0);
 
         if (preg_match('#GET /api/websocket HTTP/1.1.*Sec-WebSocket-Key: ([^\r\n]+)#is', $data, $matches)) {
             $secWebSocketKey = trim($matches[1]);
-            $this->SendDebug(__FUNCTION__, "WebSocket Upgrade Request mit Key: $secWebSocketKey", 0);
+            $this->DebugLog(__FUNCTION__, "WebSocket Upgrade Request mit Key: $secWebSocketKey", 0);
             $this->sendWebSocketHandshakeResponse($secWebSocketKey);
         }
 
@@ -1386,13 +1391,13 @@ class HaptiqueSplitter extends IPSModuleStrict
             if (strpos($line, 'Authorization: Bearer ') === 0) {
                 // Token extrahieren
                 $token = substr($line, 22); // Entfernt 'Authorization: Bearer '
-                $this->SendDebug('Process Data', 'Gefundener Token: ' . $token, 0);
+                $this->DebugLog('Process Data', 'Gefundener Token: ' . $token, 0);
 
                 // Vergleiche den Token mit dem gespeicherten
                 $storedToken = $this->ReadPropertyString('Token');
                 if (trim($token) !== trim($storedToken)) {
-                    $this->SendDebug('Stored Token', 'Gespeicherter Token: ' . $storedToken, 0);
-                    $this->SendDebug('Process Data', 'Ungültiger Token: ' . $token, 0);
+                    $this->DebugLog('Stored Token', 'Gespeicherter Token: ' . $storedToken, 0);
+                    $this->DebugLog('Process Data', 'Ungültiger Token: ' . $token, 0);
                     return;  // Ungültiger Token -> Verarbeitung abbrechen
                 }
             }
@@ -1400,13 +1405,13 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         // Falls kein Token gefunden wurde, Debug ausgeben und blockieren
         if (empty($token)) {
-            $this->SendDebug('Process Data', 'Kein Token gefunden', 0);
+            $this->DebugLog('Process Data', 'Kein Token gefunden', 0);
             return; // Kein Token -> Verarbeitung abbrechen
         }
 
         // Home Assistant Emulation oder IP-Symcon Antwort
         $emulation = $this->ReadPropertyBoolean('EmulateHomeAssistant');
-        $this->SendDebug('Emulation', 'Home Assistant Emulation: ' . ($emulation ? 'Aktiviert' : 'Deaktiviert'), 0);
+        $this->DebugLog('Emulation', 'Home Assistant Emulation: ' . ($emulation ? 'Aktiviert' : 'Deaktiviert'), 0);
         if ($emulation) {
             // Antworte im Home Assistant Stil
             $this->sendHomeAssistantResponse($data);
@@ -1430,7 +1435,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             "Connection: Upgrade\r\n" .
             "Sec-WebSocket-Accept: $acceptKey\r\n\r\n";
 
-        $this->SendDebug(__FUNCTION__, 'Sende WebSocket Handshake-Antwort', 0);
+        $this->DebugLog(__FUNCTION__, 'Sende WebSocket Handshake-Antwort', 0);
 
 
         // Lies die ClientIP und den ClientPort aus den Attributen
@@ -1470,7 +1475,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     private function sendHomeAssistantResponse($data)
     {
         // Antworte im Home Assistant Stil
-        $this->SendDebug(__FUNCTION__, 'Home Assistant Response', 0);
+        $this->DebugLog(__FUNCTION__, 'Home Assistant Response', 0);
 
         // Zerlege die Anfrage in Header und Body
         list($headers, $body) = explode("\r\n\r\n", $data, 2);
@@ -1486,12 +1491,12 @@ class HaptiqueSplitter extends IPSModuleStrict
                 $requestPath = $requestParts[1]; // Der angeforderte Pfad (z.B. /api/states)
 
                 // Debugging der erkannten Methode und des Pfades
-                $this->SendDebug(__FUNCTION__, 'HTTP Method: ' . $httpMethod, 0);
-                $this->SendDebug(__FUNCTION__, 'Request Path: ' . $requestPath, 0);
+                $this->DebugLog(__FUNCTION__, 'HTTP Method: ' . $httpMethod, 0);
+                $this->DebugLog(__FUNCTION__, 'Request Path: ' . $requestPath, 0);
 
                 // Überprüfe, ob es sich um eine POST-Anfrage handelt, und ob ein Body vorhanden ist
                 if ($httpMethod === 'POST' && !empty($body)) {
-                    $this->SendDebug(__FUNCTION__, 'Request Body: ' . $body, 0);
+                    $this->DebugLog(__FUNCTION__, 'Request Body: ' . $body, 0);
 
                     // Versuche, den Body als JSON zu dekodieren
                     $jsonData = json_decode($body, true);
@@ -1499,74 +1504,74 @@ class HaptiqueSplitter extends IPSModuleStrict
                         // JSON erfolgreich dekodiert
                         if (isset($jsonData['entity_id'])) {
                             $entityId = $jsonData['entity_id'];
-                            $this->SendDebug(__FUNCTION__, 'Entity ID erkannt: ' . $entityId, 0);
+                            $this->DebugLog(__FUNCTION__, 'Entity ID erkannt: ' . $entityId, 0);
 
                             // Beispielbehandlung für Light on/off
                             if (strpos($requestPath, '/api/services/light/turn_on') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Licht einschalten erkannt für ' . $entityId, 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Licht einschalten erkannt für ' . $entityId, 0);
                                 $this->executeLightCommand($entityId, true);
                                 return;
                             } elseif (strpos($requestPath, '/api/services/light/turn_off') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Licht ausschalten erkannt für ' . $entityId, 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Licht ausschalten erkannt für ' . $entityId, 0);
                                 $this->executeLightCommand($entityId, false);
                                 return;
                             } elseif (strpos($requestPath, '/api/services/switch/turn_on') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Switch On erkannt für ' . $entityId, 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Switch On erkannt für ' . $entityId, 0);
                                 $this->executeSwitchCommand($entityId, true);
                                 return;
                             } elseif (strpos($requestPath, '/api/services/switch/turn_off') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Switch Off erkannt für ' . $entityId, 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Switch Off erkannt für ' . $entityId, 0);
                                 $this->executeSwitchCommand($entityId, false);
                                 return;
                             } elseif (strpos($requestPath, '/api/services/automation/trigger') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Automation erkannt für ' . $entityId, 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Automation erkannt für ' . $entityId, 0);
                                 $this->executeAutomation($entityId);
                                 return;
                             } elseif (strpos($requestPath, '/api/services/media_player/media_play') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Play-Befehl erkannt.', 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Play-Befehl erkannt.', 0);
                                 $this->executePlayCommand($entityId);
                                 return;
                             } elseif ($httpMethod === 'POST' && strpos($requestPath, '/api/services/media_player/media_pause') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Pause-Befehl erkannt.', 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Pause-Befehl erkannt.', 0);
                                 $this->executePauseCommand($entityId);
                                 return;
                             } elseif ($httpMethod === 'POST' && strpos($requestPath, '/api/services/media_player/media_next_track') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Next Track-Befehl erkannt.', 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Next Track-Befehl erkannt.', 0);
                                 $this->executeNextCommand($entityId);
                                 return;
                             } elseif ($httpMethod === 'POST' && strpos($requestPath, '/api/services/media_player/media_previous_track') !== false) {
-                                $this->SendDebug('HaptiqueEmulator', 'Previous Track-Befehl erkannt.', 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Previous Track-Befehl erkannt.', 0);
                                 $this->executePreviousCommand($entityId);
                                 return;
                             }
 
                             // Führe basierend auf der entity_id die entsprechende Aktion aus
                             if ($requestPath === '/api/services/media_player/media_pause' && $entityId === 'media_player.denon_receiver') {
-                                $this->SendDebug('HaptiqueEmulator', 'Pause-Befehl für Denon Receiver erkannt.', 0);
+                                $this->DebugLog('HaptiqueEmulator', 'Pause-Befehl für Denon Receiver erkannt.', 0);
                                 $this->executePauseCommand();
                                 return;
                             }
                             // Hier können weitere if-Abfragen hinzugefügt werden, um andere Geräte oder Aktionen zu verarbeiten
                         } else {
-                            $this->SendDebug('Error', 'Keine gültige entity_id im JSON-Body gefunden.', 0);
+                            $this->DebugLog('Error', 'Keine gültige entity_id im JSON-Body gefunden.', 0);
                         }
                     } else {
-                        $this->SendDebug('Error', 'Ungültiger JSON-Body: ' . json_last_error_msg(), 0);
+                        $this->DebugLog('Error', 'Ungültiger JSON-Body: ' . json_last_error_msg(), 0);
                     }
                 }
 
                 // Neue, präzisere Routing-Logik für GET /api/states
                 if ($httpMethod === 'GET' && $requestPath === '/api/states') {
-                    $this->SendDebug(__FUNCTION__, 'Request Type GET /api/states', 0);
+                    $this->DebugLog(__FUNCTION__, 'Request Type GET /api/states', 0);
                     $this->handleGetStates();
                     return;
                 } elseif ($httpMethod === 'GET' && preg_match('#^/api/states/([a-zA-Z0-9._]+)$#', $requestPath, $matches)) {
                     $entityId = $matches[1];
-                    $this->SendDebug(__FUNCTION__, 'Request State: ' . $entityId, 0);
+                    $this->DebugLog(__FUNCTION__, 'Request State: ' . $entityId, 0);
 
                     // Einzelabfrage: Temperatur- oder Batteriesensor
                     if (preg_match('/^sensor\.(\d+)$/', $entityId, $sensorMatches)) {
-                        $this->SendDebug(__FUNCTION__, 'Sensor Einzelabfrage erkannt: ' . $entityId, 0);
+                        $this->DebugLog(__FUNCTION__, 'Sensor Einzelabfrage erkannt: ' . $entityId, 0);
                         $this->GetSensorState((int)$sensorMatches[1]);
                         return;
                     }
@@ -1596,20 +1601,20 @@ class HaptiqueSplitter extends IPSModuleStrict
 
                 // Weiteres Routing, wie gehabt
                 if ($httpMethod === 'POST' && strpos($requestPath, '/api/template') !== false) {
-                    $this->SendDebug(__FUNCTION__, 'Request Type POST', 0);
-                    $this->SendDebug(__FUNCTION__, 'Call Template', 0);
+                    $this->DebugLog(__FUNCTION__, 'Request Type POST', 0);
+                    $this->DebugLog(__FUNCTION__, 'Call Template', 0);
                     $this->handlePostTemplate();
                     return;
                 } elseif ($httpMethod === 'GET' && strpos($requestPath, '/api/states/light.hue_group') !== false) {
-                    $this->SendDebug('HaptiqueEmulator', 'Lampenstatusanfrage erkannt.', 0);
+                    $this->DebugLog('HaptiqueEmulator', 'Lampenstatusanfrage erkannt.', 0);
                     $this->executeLightToggle();
                     return;
                 } else {
-                    $this->SendDebug(__FUNCTION__, 'Keine passende Route gefunden für Methode ' . $httpMethod . ' und Pfad ' . $requestPath, 0);
+                    $this->DebugLog(__FUNCTION__, 'Keine passende Route gefunden für Methode ' . $httpMethod . ' und Pfad ' . $requestPath, 0);
                     $this->sendErrorResponse(404, "Unknown request: $httpMethod $requestPath");
                 }
             } else {
-                $this->SendDebug('HaptiqueEmulator', 'Ungültige HTTP-Anfrage: ' . $data, 0);
+                $this->DebugLog('HaptiqueEmulator', 'Ungültige HTTP-Anfrage: ' . $data, 0);
             }
         }
     }
@@ -1692,7 +1697,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function handleGetSingleStateLight(string $entityId): void
     {
-        $this->SendDebug(__FUNCTION__, "Anfrage für $entityId", 0);
+        $this->DebugLog(__FUNCTION__, "Anfrage für $entityId", 0);
 
         // Hole die Lichter aus dem Konfigurator
         $lights = $this->GetDataFromConfigurator("GetLights");
@@ -1728,7 +1733,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function handleGetSingleStateSwitch(string $entityId): void
     {
-        $this->SendDebug(__FUNCTION__, "Anfrage für $entityId", 0);
+        $this->DebugLog(__FUNCTION__, "Anfrage für $entityId", 0);
         // entityId wie 'switch.XXXXX'
         if (preg_match('/^switch\.(\d+)$/', $entityId, $matches)) {
             $variableID = (int)$matches[1];
@@ -1775,7 +1780,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function handleGetSingleStateAutomation(string $entityId): void
     {
-        $this->SendDebug(__FUNCTION__, "Anfrage für $entityId", 0);
+        $this->DebugLog(__FUNCTION__, "Anfrage für $entityId", 0);
         // Hole Automationen aus dem Konfigurator
         $automations = $this->GetDataFromConfigurator("GetAutomations");
         foreach ($automations as $automation) {
@@ -1808,7 +1813,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function handleGetSingleStateMediaPlayer(string $entityId): void
     {
-        $this->SendDebug(__FUNCTION__, "Anfrage für $entityId", 0);
+        $this->DebugLog(__FUNCTION__, "Anfrage für $entityId", 0);
         // Beispielhafter Mapper von entity_id auf VariableID
         $mapping = [
             'automation.19609' => 19609,
@@ -1844,7 +1849,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     private function sendIPSymconResponse($data)
     {
         // Antworte im IP-Symcon Stil
-        $this->SendDebug('Response', 'IP-Symcon Response', 0);
+        $this->DebugLog('Response', 'IP-Symcon Response', 0);
     }
 
     public function RequestAction($Ident, $Value): void
@@ -1911,7 +1916,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         $response = json_encode($responseDevices);
-        $this->SendDebug('Generated Device List', $response, 0);
+        $this->DebugLog('Generated Device List', $response, 0);
         $this->SendResponse($response);
     }
 
@@ -1933,7 +1938,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         $response = json_encode($statusList);
-        $this->SendDebug('Generated Status Response', $response, 0);
+        $this->DebugLog('Generated Status Response', $response, 0);
         $this->SendResponse($response);
     }
 
@@ -1942,7 +1947,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         if (preg_match('/^light\.(\d+)$/', $entityId, $matches)) {
             $variableID = (int)$matches[1];
-            $this->SendDebug("Light Service", "RequestAction ausgeführt für $entityId mit Status " . ($state ? 'an' : 'aus'), 0);
+            $this->DebugLog("Light Service", "RequestAction ausgeführt für $entityId mit Status " . ($state ? 'an' : 'aus'), 0);
             RequestAction($variableID, $state);
             $this->sendAcknowledgementResponse();
         }
@@ -1957,7 +1962,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ];
 
         if (!isset($mapping[$entityId])) {
-            $this->SendDebug(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
+            $this->DebugLog(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
             $this->sendErrorResponse(404, "Device not found");
             return;
         }
@@ -1965,7 +1970,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $varId = $mapping[$entityId];
         $state = 2; // Varibalenprofil prüfen
         RequestAction($varId, $state);
-        $this->SendDebug('HaptiqueEmulator', 'Play-Befehl ausgeführt.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Play-Befehl ausgeführt.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -1978,7 +1983,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ];
 
         if (!isset($mapping[$entityId])) {
-            $this->SendDebug(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
+            $this->DebugLog(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
             $this->sendErrorResponse(404, "Device not found");
             return;
         }
@@ -1986,7 +1991,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $varId = $mapping[$entityId];
         $state = 2; // Variablenprofil prüfen
         RequestAction($varId, $state);
-        $this->SendDebug('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -1999,7 +2004,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ];
 
         if (!isset($mapping[$entityId])) {
-            $this->SendDebug(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
+            $this->DebugLog(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
             $this->sendErrorResponse(404, "Device not found");
             return;
         }
@@ -2007,7 +2012,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $varId = $mapping[$entityId];
         $state = 2; // Variablenprofil prüfen
         RequestAction($varId, $state);
-        $this->SendDebug('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -2020,7 +2025,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ];
 
         if (!isset($mapping[$entityId])) {
-            $this->SendDebug(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
+            $this->DebugLog(__FUNCTION__, "Keine Zuordnung gefunden für $entityId", 0);
             $this->sendErrorResponse(404, "Device not found");
             return;
         }
@@ -2028,7 +2033,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $varId = $mapping[$entityId];
         $state = 2; // Variablenprofil prüfen
         RequestAction($varId, $state);
-        $this->SendDebug('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Pause-Befehl ausgeführt.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -2039,7 +2044,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         // IPS_RunScript(32999);
         $denonPowerVarId = 19938;  // Beispiel: Power-Variable des Denon-Verstärkers
         RequestAction($denonPowerVarId, true);  // Verstärker previous
-        $this->SendDebug('HaptiqueEmulator', 'Sequenz 1 wurde gestartet.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Sequenz 1 wurde gestartet.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -2050,7 +2055,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         // IPS_RunScript(43366);
         $denonPowerVarId = 19938;  // Beispiel: Power-Variable des Denon-Verstärkers
         RequestAction($denonPowerVarId, false);  // Verstärker next
-        $this->SendDebug('HaptiqueEmulator', 'Sequenz 2 wurde gestartet.', 0);
+        $this->DebugLog('HaptiqueEmulator', 'Sequenz 2 wurde gestartet.', 0);
         $this->sendAcknowledgementResponse();
     }
 
@@ -2058,7 +2063,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         if (preg_match('/^switch\.(\d+)$/', $entityId, $matches)) {
             $variableID = (int)$matches[1];
-            $this->SendDebug("Switch Service", "RequestAction ausgeführt für $entityId mit Status " . ($state ? 'an' : 'aus'), 0);
+            $this->DebugLog("Switch Service", "RequestAction ausgeführt für $entityId mit Status " . ($state ? 'an' : 'aus'), 0);
             RequestAction($variableID, $state);
             $this->sendAcknowledgementResponse();
         }
@@ -2068,7 +2073,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         if (preg_match('/^automation\.(\d+)$/', $entityId, $matches)) {
             $variableID = (int)$matches[1];
-            $this->SendDebug("Automation Service", "Runscript  ausgeführt für " . $entityId, 0);
+            $this->DebugLog("Automation Service", "Runscript  ausgeführt für " . $entityId, 0);
             IPS_RunScript($variableID);
             $this->sendAcknowledgementResponse();
         }
@@ -2083,17 +2088,17 @@ class HaptiqueSplitter extends IPSModuleStrict
         // Zustand der Lampe umschalten
         if ($currentState) {
             RequestAction($hueLightVarId, false);  // Lampe ausschalten
-            $this->SendDebug('HaptiqueEmulator', 'Hue-Lampe wurde ausgeschaltet.', 0);
+            $this->DebugLog('HaptiqueEmulator', 'Hue-Lampe wurde ausgeschaltet.', 0);
         } else {
             RequestAction($hueLightVarId, true);   // Lampe einschalten
-            $this->SendDebug('HaptiqueEmulator', 'Hue-Lampe wurde eingeschaltet.', 0);
+            $this->DebugLog('HaptiqueEmulator', 'Hue-Lampe wurde eingeschaltet.', 0);
         }
         $this->sendAcknowledgementResponse();
     }
 
     private function handleGetStates()
     {
-        $this->SendDebug(__FUNCTION__, 'Call /api/states', 0);
+        $this->DebugLog(__FUNCTION__, 'Call /api/states', 0);
         // Hier die Variablen-IDs der Hue-Gruppe und des Denon-Verstärkers einsetzen
 
         $hueState = GetValue(21033);  // Statusvariable der Hue-Gruppe (Boolean: true=An, false=Aus), Coachlampen
@@ -2152,7 +2157,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function handlePostTemplate()
     {
-        $this->SendDebug(__FUNCTION__, 'HaptiqueEmulator Geräteabfrage gestartet', 0);
+        $this->DebugLog(__FUNCTION__, 'HaptiqueEmulator Geräteabfrage gestartet', 0);
 
         // Daten aus den Properties laden
         /*
@@ -2190,7 +2195,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
             // Sende die JSON-Antwort
             $response = json_encode($devices);
-            $this->SendDebug('Generated Response', $response, 0);
+            $this->DebugLog('Generated Response', $response, 0);
             $this->SendResponse($response); // Eine Funktion, die die Antwort über den Socket zurücksendet
 
 
@@ -2411,7 +2416,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ]));
 
         // Debug-Ausgabe für die gesendete Antwort
-        $this->SendDebug('HaptiqueEmulator', 'Antwort gesendet: ' . $httpResponse, 0);
+        $this->DebugLog('HaptiqueEmulator', 'Antwort gesendet: ' . $httpResponse, 0);
     }
 
     private function sendErrorResponse(int $code, string $message): void
@@ -2442,7 +2447,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             'ClientPort' => $ClientPort
         ]));
 
-        $this->SendDebug('HaptiqueEmulator', "Fehler gesendet: $code $statusText – $message", 0);
+        $this->DebugLog('HaptiqueEmulator', "Fehler gesendet: $code $statusText – $message", 0);
     }
 
     protected function NewIDLightSwitch($LightSwitches)
@@ -2488,11 +2493,11 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function RegisterMdnsService()
     {
-        $this->SendDebug(__FUNCTION__, '🔧 DNS-SD Dienst registrieren', 0);
+        $this->DebugLog(__FUNCTION__, '🔧 DNS-SD Dienst registrieren', 0);
 
         $mdnsID = @IPS_GetInstanceListByModuleID('{780B2D48-916C-4D59-AD35-5A429B2355A5}')[0] ?? 0;
         if ($mdnsID === 0) {
-            $this->SendDebug(__FUNCTION__, '⚠️ Keine DNS-SD Control Instanz gefunden!', 0);
+            $this->DebugLog(__FUNCTION__, '⚠️ Keine DNS-SD Control Instanz gefunden!', 0);
             return;
         }
 
@@ -2523,7 +2528,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         IPS_SetProperty($mdnsID, 'Services', json_encode(array_values($entries)));
         IPS_ApplyChanges($mdnsID);
 
-        $this->SendDebug(__FUNCTION__, '✅ mDNS-Eintrag hinzugefügt: ' . json_encode(end($entries)), 0);
+        $this->DebugLog(__FUNCTION__, '✅ mDNS-Eintrag hinzugefügt: ' . json_encode(end($entries)), 0);
     }
 
     private function UnregisterMdnsService()
@@ -2579,7 +2584,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         // Größe der Daten berechnen und debuggen
         $treeDataSize = strlen(json_encode($treeData));
-        $this->SendDebug('TreeData Size', "Größe von Test-AVDevicesTree: " . $treeDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von Test-AVDevicesTree: " . $treeDataSize . " Bytes", 0);
 
         // Ergebnis als TreeData zurückgeben
         return $treeData;
@@ -2587,7 +2592,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     public function LoadAVDevices(): array
     {
-        $this->SendDebug(__FUNCTION__, "started", 0);
+        $this->DebugLog(__FUNCTION__, "started", 0);
 
         // Setze die GUIDs für die verschiedenen Geräte
         $harmonyGUID = '{B0B4D0C2-192E-4669-A624-5D5E72DBB555}';
@@ -2663,7 +2668,7 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         // Größe der Tree-Daten bestimmen und Debug-Nachricht senden
         $treeDataSize = strlen(json_encode($treeData));
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
 
         // Die Daten im Attribut speichern
         $this->WriteAttributeString('AVDevicesTree', json_encode($treeData));
@@ -2677,7 +2682,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         // Checked-Status aus dem vorherigen Tree übernehmen
         $checkedValue = $this->getCheckedStatus($instanceID, $previousTree);
 
-        $this->SendDebug('CreateDeviceNode', "Erstelle Knoten für Instanz " . $instanceID . " Checked: " . json_encode($checkedValue), 0);
+        $this->DebugLog('CreateDeviceNode', "Erstelle Knoten für Instanz " . $instanceID . " Checked: " . json_encode($checkedValue), 0);
 
         return [
             'id' => $id,
@@ -2713,11 +2718,11 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         if ($avrCapabilities) {
             // Wenn Fähigkeiten gefunden wurden, gebe diese aus
-            $this->SendDebug('AVR Capabilities', json_encode($avrCapabilities), 0);
+            $this->DebugLog('AVR Capabilities', json_encode($avrCapabilities), 0);
             return $avrCapabilities;
         } else {
             // Fehlerbehandlung, falls keine Fähigkeiten gefunden werden
-            $this->SendDebug('AVR Capabilities', 'Keine Fähigkeiten gefunden für ID: ' . $id, 0);
+            $this->DebugLog('AVR Capabilities', 'Keine Fähigkeiten gefunden für ID: ' . $id, 0);
             return false;
         }
     }
@@ -2818,7 +2823,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         $treeDataSize = strlen(json_encode($treeData));   // Größe der Daten bestimmen
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
 
 
         // Das Ergebnis im Formular zurückgeben
@@ -2855,17 +2860,17 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $AVDevicesTree = $this->ReadAttributeString('AVDevicesTree');
         if (empty($AVDevicesTree)) {
-            $this->SendDebug('GetAV_Devices', "Keine Geräte im Attribut gespeichert", 0);
+            $this->DebugLog('GetAV_Devices', "Keine Geräte im Attribut gespeichert", 0);
             return [];
         }
         if ($AVDevicesTree == "[]") {
-            $this->SendDebug('GetAV_Devices', "Geräte für Attribut abrufen", 0);
+            $this->DebugLog('GetAV_Devices', "Geräte für Attribut abrufen", 0);
             $AVDevicesTreeArray = $this->LoadAVDevices();
             return $AVDevicesTreeArray;
         }
 
         $treeDataSize = strlen($AVDevicesTree);   // Größe der Daten bestimmen
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von AVDevicesTree: " . $treeDataSize . " Bytes", 0);
         $decoded = json_decode($AVDevicesTree, true);
         return is_array($decoded) ? $decoded : [];
     }
@@ -2880,13 +2885,13 @@ class HaptiqueSplitter extends IPSModuleStrict
         // Hole das komplette Formular der Instanz
         $form = json_decode($this->GetConfigurationForm(), true);
         $formDataSize = strlen(json_encode($form));   // Größe der Daten bestimmen
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $formDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von AVDevicesTree: " . $formDataSize . " Bytes", 0);
 
         // Suche rekursiv nach dem Feld
         $field = $this->FindFieldInItems($form['elements'], $fieldName);
-        $this->SendDebug('GetFormField', json_encode($field), 0);
+        $this->DebugLog('GetFormField', json_encode($field), 0);
         $fieldDataSize = strlen(json_encode($field));   // Größe der Daten bestimmen
-        $this->SendDebug('TreeData Size', "Größe von AVDevicesTree: " . $fieldDataSize . " Bytes", 0);
+        $this->DebugLog('TreeData Size', "Größe von AVDevicesTree: " . $fieldDataSize . " Bytes", 0);
 
         // Rückgabe des Feldes oder null, wenn es nicht gefunden wurde
         return $field;
@@ -2941,7 +2946,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $rooms = $this->RS90_GetRooms();
         if (!is_array($rooms)) {
-            $this->SendDebug(__FUNCTION__, 'RS90_GetRooms returned no array', 0);
+            $this->DebugLog(__FUNCTION__, 'RS90_GetRooms returned no array', 0);
             return [];
         }
 
@@ -2966,7 +2971,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $raw = $this->RS90_GetDeviceDashboard();
         if (!is_array($raw)) {
-            $this->SendDebug(__FUNCTION__, 'RS90_GetDeviceDashboard returned no array', 0);
+            $this->DebugLog(__FUNCTION__, 'RS90_GetDeviceDashboard returned no array', 0);
             return [];
         }
 
@@ -3009,7 +3014,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     {
         $deviceList = $this->RS90_GetCustomURLDevices();
         if (!is_array($deviceList)) {
-            $this->SendDebug(__FUNCTION__, 'RS90_GetCustomURLDevices returned no array', 0);
+            $this->DebugLog(__FUNCTION__, 'RS90_GetCustomURLDevices returned no array', 0);
             return [];
         }
 
@@ -3032,7 +3037,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             ];
         }
 
-        $this->SendDebug(__FUNCTION__, json_encode($formattedDevices), 0);
+        $this->DebugLog(__FUNCTION__, json_encode($formattedDevices), 0);
         return $formattedDevices;
     }
 
@@ -3043,7 +3048,7 @@ class HaptiqueSplitter extends IPSModuleStrict
     private function GetCommandListForm(): array
     {
         $device_id = $this->Get_Device_id();
-        $this->SendDebug('GetCommandListForm', "Device ID: " . $device_id, 0);
+        $this->DebugLog('GetCommandListForm', "Device ID: " . $device_id, 0);
         $values = [];
         $device_commands = $this->RS90_GetDeviceCommands($device_id);
         if (!is_array($device_commands) || !isset($device_commands['controls']) || !is_array($device_commands['controls'])) {
@@ -3078,22 +3083,22 @@ class HaptiqueSplitter extends IPSModuleStrict
                 $this->UpdateFormField('url', 'visible', false);
             }
         }
-        $this->SendDebug('GetCommandListForm', "Values: " . json_encode($values), 0);
+        $this->DebugLog('GetCommandListForm', "Values: " . json_encode($values), 0);
         return $values;
     }
 
     public function Set_Current_Device(string $device_id): string
     {
-        $this->SendDebug("OnEdit", "trigger with device id " . $device_id, 0);
+        $this->DebugLog("OnEdit", "trigger with device id " . $device_id, 0);
         $this->WriteAttributeString("current_device_id", $device_id);
-        $this->SendDebug('Set_Device_id', json_encode($device_id), 0);
+        $this->DebugLog('Set_Device_id', json_encode($device_id), 0);
         return $device_id;
     }
 
     public function Get_Device_id(): string
     {
         $device_id = $this->ReadAttributeString("current_device_id");
-        $this->SendDebug('Get_Device_id', json_encode($device_id), 0);
+        $this->DebugLog('Get_Device_id', json_encode($device_id), 0);
         return $device_id;
     }
 
@@ -3111,7 +3116,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             'status' => $this->FormStatus()];
 
         $formSize = strlen(json_encode($form));  // Größe des Formulars in Bytes
-        $this->SendDebug('Form Size', "Configuration form size: " . $formSize . " bytes", 0);
+        $this->DebugLog('Form Size', "Configuration form size: " . $formSize . " bytes", 0);
         return json_encode($form);
     }
 
@@ -3615,7 +3620,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         if ($step < 1 || $step > 40) {
             $message = 'Schrittweite muss zwischen 1 und 40 liegen';
             echo $message;
-            $this->SendDebug('Fehlerhafter Eingabewert:', $message, 0);
+            $this->DebugLog('Fehlerhafter Eingabewert:', $message, 0);
             return;
         }
         $valmax = 18;
@@ -3657,7 +3662,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         $variableId = @IPS_GetObjectIDByIdent('MU', $instanceId);
         if ($variableId === false) {
             // Debug-Meldung, falls die Variable nicht gefunden wurde
-            $this->SendDebug(__FUNCTION__, "Variable mit Ident 'MU' nicht gefunden für Instanz-ID: $instanceId", 0);
+            $this->DebugLog(__FUNCTION__, "Variable mit Ident 'MU' nicht gefunden für Instanz-ID: $instanceId", 0);
             return false; // Standardwert: Nicht gemutet
         }
 
@@ -3665,11 +3670,11 @@ class HaptiqueSplitter extends IPSModuleStrict
         if (IPS_VariableExists($variableId)) {
             // Wert der Variable auslesen
             $muteStatus = GetValueBoolean($variableId);
-            $this->SendDebug(__FUNCTION__, "Mute-Status aus Variable: $muteStatus", 0);
+            $this->DebugLog(__FUNCTION__, "Mute-Status aus Variable: $muteStatus", 0);
             return $muteStatus;
         } else {
             // Debug-Meldung, falls die ID keine Variable ist
-            $this->SendDebug(__FUNCTION__, "Die gefundene ID ist keine Variable: $variableId", 0);
+            $this->DebugLog(__FUNCTION__, "Die gefundene ID ist keine Variable: $variableId", 0);
             return false; // Standardwert: Nicht gemutet
         }
     }
@@ -4764,7 +4769,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             $id = $light["Light_ID"];
             $name = $light["Name"];
             $switchVarID = $light["SwitchVariable"];
-            $this->SendDebug("Light", "$name ($switchVarID)", 0);
+            $this->DebugLog("Light", "$name ($switchVarID)", 0);
 
             $value = GetValue($switchVarID); // Boolean on/off
             $array[] = [
@@ -4792,7 +4797,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             // $id = $switch["Switch_ID"];
             $name = $switch["Name"];
             $switchVarID = $switch["SwitchVariable"];
-            $this->SendDebug("Switch", "$name ($switchVarID)", 0);
+            $this->DebugLog("Switch", "$name ($switchVarID)", 0);
 
             $value = GetValue($switchVarID); // Boolean on/off
             $array[] = [
@@ -4815,9 +4820,9 @@ class HaptiqueSplitter extends IPSModuleStrict
 
         // Automation (from Configurator)
         $automationList = $this->GetDataFromConfigurator("GetAutomations");
-        $this->SendDebug(__FUNCTION__, "Automations " . json_encode($automationList), 0);
+        $this->DebugLog(__FUNCTION__, "Automations " . json_encode($automationList), 0);
         foreach ($automationList as $automation) {
-            $this->SendDebug("Automation", json_encode($automation), 0);
+            $this->DebugLog("Automation", json_encode($automation), 0);
             // $id = $automation["Automation_ID"];
             $script_id = $automation["ScriptID"];
             $name = $automation["Name"];
@@ -4979,7 +4984,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         ]);
 
         $data = $this->SendDataToChildren($payload);  // gibt Array mit 1 Element zurück
-        $this->SendDebug(__FUNCTION__, json_encode($data), 0);
+        $this->DebugLog(__FUNCTION__, json_encode($data), 0);
 
         // prüfen, ob Antwort da ist
         if (is_array($data) && isset($data[0])) {
