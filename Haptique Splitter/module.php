@@ -5783,6 +5783,7 @@ class HaptiqueSplitter extends IPSModuleStrict
             'GetLights' => 'Lights',
             'GetTemperatureSensors' => 'TemperatureSensor',
             'GetBatterySensors' => 'BatterySensor',
+            'GetHumiditySensors' => 'HumiditySensor',
             'GetMotionSensors' => 'MotionSensor',
             'GetIlluminanceSensors' => 'IlluminanceSensor',
             'GetMediaPlayers' => 'MediaPlayer'

@@ -80,6 +80,31 @@ class HomeAssistantEntityRepository
         return $deviceList;
     }
 
+    public function getMediaPlayerCover(string $entityId): ?array
+    {
+        foreach ($this->getData('GetMediaPlayers') as $mediaPlayer) {
+            $controlVarID = (int)($mediaPlayer['ControlVariable'] ?? 0);
+            $mediaPlayerObjectID = $this->getConfiguredOrParentInstanceID($mediaPlayer, 'InstanceID', ['ControlVariable'], (int)($mediaPlayer['Mediaplayer_ID'] ?? 0));
+            if ($controlVarID <= 0 || $mediaPlayerObjectID <= 0 || $entityId !== 'media_player.' . $mediaPlayerObjectID) {
+                continue;
+            }
+
+            $cover = $this->readOptionalString($mediaPlayer['CoverVariable'] ?? null, '');
+            if ($cover === '') {
+                $coverMediaID = (int)($mediaPlayer['CoverMediaID'] ?? 0);
+                if ($coverMediaID <= 0) {
+                    return null;
+                }
+
+                return $this->resolveMediaPlayerCoverMedia($coverMediaID);
+            }
+
+            return $this->resolveMediaPlayerCover($cover);
+        }
+
+        return null;
+    }
+
     public function getEntities(): array
     {
         $now = date('Y-m-d\TH:i:s.000000P');
@@ -87,17 +112,18 @@ class HomeAssistantEntityRepository
 
         foreach ($this->getData('GetLights') as $light) {
             $switchVarID = (int)($light['SwitchVariable'] ?? 0);
-            if ($switchVarID <= 0) {
+            $lightObjectID = $this->getConfiguredOrParentInstanceID($light, 'InstanceID', ['SwitchVariable'], (int)($light['Light_ID'] ?? 0));
+            if ($switchVarID <= 0 || $lightObjectID <= 0) {
                 continue;
             }
 
-            $name = (string)($light['Name'] ?? ('Light ' . $switchVarID));
+            $name = (string)($light['Name'] ?? ('Light ' . $lightObjectID));
             $isOn = $this->readBoolState($switchVarID);
             $state = $isOn ? 'on' : 'off';
             $entity = $this->buildEntity(
                 'light',
-                'light.' . $switchVarID,
-                $switchVarID,
+                'light.' . $lightObjectID,
+                $lightObjectID,
                 $state,
                 array_merge([
                     'friendly_name' => $name,
@@ -107,6 +133,7 @@ class HomeAssistantEntityRepository
                 $now
             );
             $entity['targets'] = [
+                'instance' => $lightObjectID,
                 'switch' => $switchVarID,
                 'brightness' => (int)($light['BrightnessVariable'] ?? 0),
                 'color_temperature' => (int)($light['ColorTemperatureVariable'] ?? 0)
@@ -204,6 +231,27 @@ class HomeAssistantEntityRepository
             );
         }
 
+        foreach ($this->getData('GetHumiditySensors') as $sensor) {
+            $varID = (int)($sensor['HumidityVariable'] ?? 0);
+            if ($varID <= 0) {
+                continue;
+            }
+
+            $entities[] = $this->buildEntity(
+                'sensor',
+                'sensor.' . $varID,
+                $varID,
+                (string)$this->readNumericValue($varID, 0),
+                [
+                    'device_class' => 'humidity',
+                    'unit_of_measurement' => '%',
+                    'state_class' => 'measurement',
+                    'friendly_name' => (string)($sensor['Name'] ?? ('Humidity ' . $varID))
+                ],
+                $now
+            );
+        }
+
         foreach ($this->getData('GetMotionSensors') as $sensor) {
             $varID = (int)($sensor['MotionVariable'] ?? 0);
             if ($varID <= 0) {
@@ -211,12 +259,13 @@ class HomeAssistantEntityRepository
             }
 
             $entities[] = $this->buildEntity(
-                'binary_sensor',
-                'binary_sensor.' . $varID,
+                'sensor',
+                'sensor.' . $varID,
                 $varID,
-                $this->readBoolState($varID) ? 'on' : 'off',
+                $this->readBoolState($varID) ? 'detected' : 'clear',
                 [
                     'device_class' => 'motion',
+                    'state_class' => 'measurement',
                     'friendly_name' => (string)($sensor['Name'] ?? ('Motion ' . $varID))
                 ],
                 $now
@@ -233,10 +282,9 @@ class HomeAssistantEntityRepository
                 'sensor',
                 'sensor.' . $varID,
                 $varID,
-                (string)$this->readValue($varID),
+                (string)$this->readNumericValue($varID, 0),
                 [
                     'state_class' => 'measurement',
-                    'light_level' => 0,
                     'unit_of_measurement' => 'lx',
                     'device_class' => 'illuminance',
                     'friendly_name' => (string)($sensor['Name'] ?? ('Illuminance ' . $varID))
@@ -247,22 +295,41 @@ class HomeAssistantEntityRepository
 
         foreach ($this->getData('GetMediaPlayers') as $mediaPlayer) {
             $controlVarID = (int)($mediaPlayer['ControlVariable'] ?? 0);
-            if ($controlVarID <= 0) {
+            $mediaPlayerObjectID = $this->getConfiguredOrParentInstanceID($mediaPlayer, 'InstanceID', ['ControlVariable'], (int)($mediaPlayer['Mediaplayer_ID'] ?? 0));
+            if ($controlVarID <= 0 || $mediaPlayerObjectID <= 0) {
                 continue;
             }
 
-            $entities[] = $this->buildEntity(
+            $entityId = 'media_player.' . $mediaPlayerObjectID;
+            $entity = $this->buildEntity(
                 'media_player',
-                'media_player.' . $controlVarID,
-                $controlVarID,
-                (string)$this->readValue($controlVarID),
-                [
-                    'friendly_name' => (string)($mediaPlayer['Name'] ?? ('Media Player ' . $controlVarID)),
-                    'supported_features' => 4096,
-                    'volume_level' => 0.5
-                ],
+                $entityId,
+                $mediaPlayerObjectID,
+                $this->readMediaPlayerState($mediaPlayer),
+                $this->buildMediaPlayerAttributes($mediaPlayer, $entityId),
                 $now
             );
+            $entity['targets'] = [
+                'media_player' => $mediaPlayerObjectID,
+                'control' => $controlVarID,
+                'playback_state' => (int)($mediaPlayer['PlaybackStateVariable'] ?? 0),
+                'volume' => (int)($mediaPlayer['VolumeVariable'] ?? 0),
+                'mute' => (int)($mediaPlayer['MuteVariable'] ?? 0),
+                'position' => (int)($mediaPlayer['PositionVariable'] ?? 0),
+                'elapsed' => (int)($mediaPlayer['ElapsedVariable'] ?? 0),
+                'duration' => (int)($mediaPlayer['DurationVariable'] ?? 0),
+                'previous' => (int)($mediaPlayer['NextPreviousVariable'] ?? ($mediaPlayer['PreviousVariable'] ?? 0)),
+                'play_pause' => $controlVarID,
+                'next' => (int)($mediaPlayer['NextPreviousVariable'] ?? ($mediaPlayer['NextVariable'] ?? 0)),
+                'shuffle' => (int)($mediaPlayer['ShuffleVariable'] ?? 0),
+                'repeat' => (int)($mediaPlayer['RepeatVariable'] ?? 0)
+            ];
+            $this->debug('ENTITY', '🧭 HA media player mapping built', 4, [
+                'entity_id' => $entityId,
+                'name' => (string)($mediaPlayer['Name'] ?? ('Media Player ' . $mediaPlayerObjectID)),
+                'targets' => $entity['targets']
+            ]);
+            $entities[] = $entity;
         }
 
         $this->debug('ENTITY', '🧱 HA entities collected', 4, [
@@ -308,6 +375,168 @@ class HomeAssistantEntityRepository
         ];
     }
 
+    private function readMediaPlayerState(array $mediaPlayer): string
+    {
+        $stateVariable = (int)($mediaPlayer['PlaybackStateVariable'] ?? 0);
+        if ($stateVariable > 0) {
+            $state = strtolower(trim((string)$this->readValue($stateVariable)));
+            if (in_array($state, ['playing', 'paused', 'idle', 'standby', 'off', 'unknown', 'unavailable'], true)) {
+                return $state;
+            }
+        }
+
+        $controlVariable = (int)($mediaPlayer['ControlVariable'] ?? 0);
+        if ($controlVariable > 0) {
+            $value = $this->readValue($controlVariable);
+            if (is_string($value)) {
+                $value = strtolower(trim($value));
+                if (in_array($value, ['playing', 'paused', 'idle', 'standby', 'off'], true)) {
+                    return $value;
+                }
+            }
+        }
+
+        return 'paused';
+    }
+
+    private function buildMediaPlayerAttributes(array $mediaPlayer, string $entityId): array
+    {
+        $volumeLevel = $this->readMediaPlayerVolume($mediaPlayer['VolumeVariable'] ?? null);
+        $isMuted = $this->readOptionalBool($mediaPlayer['MuteVariable'] ?? null) ?? false;
+        $title = $this->readOptionalString($mediaPlayer['TitleVariable'] ?? null, 'Chillout Ibiza');
+        $artist = $this->readOptionalString($mediaPlayer['ArtistVariable'] ?? null, 'Lounge Music Cafe');
+        $source = $this->readOptionalString($mediaPlayer['SourceVariable'] ?? null, 'Line-in');
+        $cover = $this->readOptionalString($mediaPlayer['CoverVariable'] ?? null, '');
+        $coverMediaID = (int)($mediaPlayer['CoverMediaID'] ?? 0);
+        $position = $this->readOptionalInt($mediaPlayer['PositionVariable'] ?? null) ?? $this->readOptionalInt($mediaPlayer['ElapsedVariable'] ?? null) ?? 0;
+        $duration = $this->readOptionalInt($mediaPlayer['DurationVariable'] ?? null) ?? 167;
+        $shuffle = $this->readOptionalBool($mediaPlayer['ShuffleVariable'] ?? null) ?? false;
+        $repeat = $this->readMediaPlayerRepeat($mediaPlayer['RepeatVariable'] ?? null);
+
+        $attributes = [
+            'source_list' => [$source],
+            'group_members' => [$entityId],
+            'volume_level' => $volumeLevel,
+            'is_volume_muted' => $isMuted,
+            'media_content_type' => 'music',
+            'media_duration' => $duration,
+            'media_position' => $position,
+            'media_position_updated_at' => gmdate('Y-m-d\TH:i:s.uP'),
+            'media_title' => $title,
+            'media_artist' => $artist,
+            'media_album_name' => '',
+            'shuffle' => $shuffle,
+            'repeat' => $repeat,
+            'queue_position' => 1,
+            'queue_size' => 1,
+            'device_class' => 'speaker',
+            'friendly_name' => (string)($mediaPlayer['Name'] ?? $entityId),
+            'supported_features' => 4127295
+        ];
+
+        if ($cover !== '' || $coverMediaID > 0) {
+            $attributes['entity_picture'] = $this->buildMediaPlayerCoverUrl($cover !== '' ? $cover : 'media:' . $coverMediaID, $entityId);
+        }
+
+        return $attributes;
+    }
+
+    private function buildMediaPlayerCoverUrl(string $cover, string $entityId): string
+    {
+        if (preg_match('#^https?://#i', $cover) === 1 || str_starts_with($cover, '/api/')) {
+            return $cover;
+        }
+
+        return '/api/media_player_proxy/' . rawurlencode($entityId) . '?token=symcon-rs90&cache=' . substr(sha1($cover), 0, 16);
+    }
+
+    private function resolveMediaPlayerCover(string $cover): ?array
+    {
+        if (preg_match('#^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$#s', $cover, $matches) === 1) {
+            $decoded = base64_decode($matches[2], true);
+            if (is_string($decoded)) {
+                return [
+                    'body' => $decoded,
+                    'content_type' => $matches[1]
+                ];
+            }
+        }
+
+        if (is_file($cover) && is_readable($cover)) {
+            $body = @file_get_contents($cover);
+            if (is_string($body)) {
+                return [
+                    'body' => $body,
+                    'content_type' => $this->guessImageContentType($cover)
+                ];
+            }
+        }
+
+        $decoded = base64_decode($cover, true);
+        if (is_string($decoded) && $decoded !== '') {
+            return [
+                'body' => $decoded,
+                'content_type' => $this->guessImageContentTypeFromBinary($decoded)
+            ];
+        }
+
+        return null;
+    }
+
+    private function resolveMediaPlayerCoverMedia(int $mediaID): ?array
+    {
+        if (!function_exists('IPS_MediaExists') || !@IPS_MediaExists($mediaID)) {
+            return null;
+        }
+
+        $content = @IPS_GetMediaContent($mediaID);
+        if (!is_string($content) || $content === '') {
+            return null;
+        }
+
+        $decoded = base64_decode($content, true);
+        if (!is_string($decoded) || $decoded === '') {
+            return null;
+        }
+
+        return [
+            'body' => $decoded,
+            'content_type' => $this->guessImageContentTypeFromBinary($decoded)
+        ];
+    }
+
+    private function guessImageContentType(string $path): string
+    {
+        return match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            default => 'application/octet-stream'
+        };
+    }
+
+    private function guessImageContentTypeFromBinary(string $body): string
+    {
+        if (str_starts_with($body, "\xFF\xD8\xFF")) {
+            return 'image/jpeg';
+        }
+
+        if (str_starts_with($body, "\x89PNG\r\n\x1A\n")) {
+            return 'image/png';
+        }
+
+        if (str_starts_with($body, 'GIF87a') || str_starts_with($body, 'GIF89a')) {
+            return 'image/gif';
+        }
+
+        if (substr($body, 0, 4) === 'RIFF' && substr($body, 8, 4) === 'WEBP') {
+            return 'image/webp';
+        }
+
+        return 'application/octet-stream';
+    }
+
     private function buildEntity(
         string $domain,
         string $entityId,
@@ -350,6 +579,68 @@ class HomeAssistantEntityRepository
         return is_array($data) ? $data : [];
     }
 
+    private function getConfiguredOrParentInstanceID(array $config, string $instanceKey, array $variableKeys, int $fallbackID = 0): int
+    {
+        $configuredID = (int)($config[$instanceKey] ?? 0);
+        if ($this->isSymconInstanceID($configuredID)) {
+            return $configuredID;
+        }
+
+        foreach ($variableKeys as $variableKey) {
+            $variableID = (int)($config[$variableKey] ?? 0);
+            $parentID = $this->getVariableParentInstanceID($variableID);
+            if ($parentID > 0) {
+                return $parentID;
+            }
+        }
+
+        if ($this->isSymconInstanceID($fallbackID)) {
+            return $fallbackID;
+        }
+
+        return 0;
+    }
+
+    private function getVariableParentInstanceID(int $variableID): int
+    {
+        if ($variableID <= 0 || !function_exists('IPS_VariableExists') || !@IPS_VariableExists($variableID)) {
+            return 0;
+        }
+
+        if (!function_exists('IPS_GetParent')) {
+            return 0;
+        }
+
+        $parentID = (int)@IPS_GetParent($variableID);
+        for ($i = 0; $i < 20 && $parentID > 0; $i++) {
+            if ($this->isSymconInstanceID($parentID)) {
+                return $parentID;
+            }
+
+            $nextParentID = (int)@IPS_GetParent($parentID);
+            if ($nextParentID <= 0 || $nextParentID === $parentID) {
+                break;
+            }
+
+            $parentID = $nextParentID;
+        }
+
+        return 0;
+    }
+
+    private function isSymconInstanceID(int $objectID): bool
+    {
+        if ($objectID <= 0) {
+            return false;
+        }
+
+        if (function_exists('IPS_InstanceExists')) {
+            return @IPS_InstanceExists($objectID);
+        }
+
+        return $objectID > 0;
+    }
+
     private function readBoolState(int $variableID): bool
     {
         return (bool)$this->readValue($variableID);
@@ -368,6 +659,77 @@ class HomeAssistantEntityRepository
         }
 
         return (int)round((float)$value);
+    }
+
+    private function readOptionalBool($variableID): ?bool
+    {
+        $variableID = (int)$variableID;
+        if ($variableID <= 0) {
+            return null;
+        }
+
+        return (bool)$this->readValue($variableID);
+    }
+
+    private function readOptionalString($variableID, string $fallback): string
+    {
+        $variableID = (int)$variableID;
+        if ($variableID <= 0) {
+            return $fallback;
+        }
+
+        $value = $this->readValue($variableID);
+        if ($value === 'unknown' || $value === null) {
+            return $fallback;
+        }
+
+        return (string)$value;
+    }
+
+    private function readMediaPlayerVolume($variableID): float
+    {
+        $variableID = (int)$variableID;
+        if ($variableID <= 0) {
+            return 0.5;
+        }
+
+        $value = $this->readValue($variableID);
+        if (!is_numeric($value)) {
+            return 0.5;
+        }
+
+        $volume = (float)$value;
+        if ($volume > 1.0) {
+            $volume /= 100;
+        }
+
+        return max(0.0, min(1.0, $volume));
+    }
+
+    private function readMediaPlayerRepeat($variableID): string
+    {
+        $variableID = (int)$variableID;
+        if ($variableID <= 0) {
+            return 'off';
+        }
+
+        $value = $this->readValue($variableID);
+        if (is_bool($value)) {
+            return $value ? 'all' : 'off';
+        }
+
+        if (is_numeric($value)) {
+            return ((int)$value) === 0 ? 'off' : 'all';
+        }
+
+        $repeat = strtolower(trim((string)$value));
+        return in_array($repeat, ['off', 'one', 'all'], true) ? $repeat : 'off';
+    }
+
+    private function readNumericValue(int $variableID, $fallback)
+    {
+        $value = $this->readValue($variableID);
+        return is_numeric($value) ? $value : $fallback;
     }
 
     private function readValue(int $variableID)

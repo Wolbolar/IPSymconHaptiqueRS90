@@ -29,6 +29,19 @@ class HomeAssistantEmulator
         return $this->repository->getState($entityId);
     }
 
+    public function getMediaPlayerCoverResponse(string $entityId): HaptiqueHttpResponse
+    {
+        $cover = $this->repository->getMediaPlayerCover($entityId);
+        if ($cover === null) {
+            return HaptiqueHttpResponse::error(404, "Cover for '$entityId' not found");
+        }
+
+        return new HaptiqueHttpResponse(200, (string)$cover['body'], [
+            'Content-Type' => (string)$cover['content_type'],
+            'Cache-Control' => 'no-cache'
+        ]);
+    }
+
     public function handleRawHttpRequest(string $rawRequest): HaptiqueHttpResponse
     {
         $request = $this->parseHttpRequest($rawRequest);
@@ -67,6 +80,14 @@ class HomeAssistantEmulator
 
             $this->debug('ENTITY', '📦 HA single state built', 4, ['entity_id' => $matches[1]]);
             return $this->respond(HaptiqueHttpResponse::json(200, $state), 'single_state');
+        }
+
+        if ($request['method'] === 'GET' && preg_match('#^/api/media_player_proxy/([a-zA-Z0-9._%-]+)$#', $request['path'], $matches)) {
+            $entityId = rawurldecode($matches[1]);
+            $this->debug('ENTITY', '🖼️ HA media player cover requested', 4, [
+                'entity_id' => $entityId
+            ]);
+            return $this->respond($this->getMediaPlayerCoverResponse($entityId), 'media_player_cover');
         }
 
         if ($request['method'] === 'POST' && preg_match('#^/api/services/([a-zA-Z0-9_]+)/([a-zA-Z0-9_]+)$#', $request['path'], $matches)) {

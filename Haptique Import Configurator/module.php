@@ -140,6 +140,10 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                 $response = $this->ReadPropertyString("BatterySensor");
                 $this->DebugResponse("GetBatterySensors", $response);
                 return $response;
+            case 'GetHumiditySensors':
+                $response = $this->ReadPropertyString("HumiditySensor");
+                $this->DebugResponse("GetHumiditySensors", $response);
+                return $response;
             case 'GetMotionSensors':
                 $response = $this->ReadPropertyString("MotionSensor");
                 $this->DebugResponse("GetMotionSensors", $response);
@@ -1096,11 +1100,20 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                     "delete" => true,
                                     "columns" => [
                                         [
-                                            "caption" => "Light ID",
+                                            "caption" => "List ID",
                                             "name" => "Light_ID",
                                             "width" => "100px",
                                             "add" => $this->ReadAttributeInteger('NewIDLightSwitch'),
                                             "save" => true
+                                        ],
+                                        [
+                                            "caption" => "Instance",
+                                            "name" => "InstanceID",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectInstance'
+                                            ]
                                         ],
                                         [
                                             "caption" => "Name",
@@ -1248,11 +1261,20 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                     "delete" => true,
                                     "columns" => [
                                         [
-                                            "caption" => "Mediaplayer ID",
+                                            "caption" => "List ID",
                                             "name" => "Mediaplayer_ID",
                                             "width" => "250px",
                                             "add" => $this->ReadAttributeInteger('NewIDMediaPlayer'),
                                             "save" => true
+                                        ],
+                                        [
+                                            "caption" => "Instance",
+                                            "name" => "InstanceID",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectInstance'
+                                            ]
                                         ],
                                         [
                                             "caption" => "Name",
@@ -1284,6 +1306,132 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                         [
                                             "caption" => "Control Variable",
                                             "name" => "ControlVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Playback State Variable",
+                                            "name" => "PlaybackStateVariable",
+                                            "width" => "220px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Volume Variable",
+                                            "name" => "VolumeVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Mute Variable",
+                                            "name" => "MuteVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Cover Variable",
+                                            "name" => "CoverVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Cover Media",
+                                            "name" => "CoverMediaID",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectMedia'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Source/App Variable",
+                                            "name" => "SourceVariable",
+                                            "width" => "220px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Title Variable",
+                                            "name" => "TitleVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Artist Variable",
+                                            "name" => "ArtistVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Position Variable",
+                                            "name" => "PositionVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Elapsed Variable",
+                                            "name" => "ElapsedVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Duration Variable",
+                                            "name" => "DurationVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Next/Previous Variable",
+                                            "name" => "NextPreviousVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Shuffle Variable",
+                                            "name" => "ShuffleVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Repeat Variable",
+                                            "name" => "RepeatVariable",
                                             "width" => "200px",
                                             "add" => 0,
                                             'edit' => [
@@ -1384,6 +1532,49 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                         ]
                                     ],
                                     // "values" => []
+                                ]
+                            ]
+                        ],
+                        [
+                            "type" => "ExpansionPanel",
+                            "caption" => $this->Translate('💧 Humidity Sensor'),
+                            "items" => [
+                                [
+                                    "type" => "List",
+                                    "name" => "HumiditySensor",
+                                    "caption" => "Humidity Sensor",
+                                    "onAdd" => 'CRSC_AddID($id, "NewIDHumiditySensor", "HumiditySensor");',
+                                    "onDelete" => 'CRSC_DeleteID($id, "NewIDHumiditySensor", "HumiditySensor");',
+                                    "add" => true,
+                                    "delete" => true,
+                                    "columns" => [
+                                        [
+                                            "caption" => "Sensor ID",
+                                            "name" => "Sensor_ID",
+                                            "width" => "250px",
+                                            "add" => $this->ReadAttributeInteger('NewIDHumiditySensor'),
+                                            "save" => true
+                                        ],
+                                        [
+                                            "caption" => "Name",
+                                            "name" => "Name",
+                                            "width" => "auto",
+                                            "add" => $this->Translate("Name"),
+                                            'edit' => [
+                                                'type' => 'ValidationTextBox'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Humidity Variable",
+                                            "name" => "HumidityVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ]
+                                    ],
+                                    "values" => []
                                 ]
                             ]
                         ],
