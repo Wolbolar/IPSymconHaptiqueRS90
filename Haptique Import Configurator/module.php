@@ -104,48 +104,69 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
 
     public function ReceiveData($JSONString): string
     {
-        $data = json_decode($JSONString, true);
+        $this->SendDebug('📥 ReceiveData called', (string)$JSONString, 0);
 
-        if (!isset($data['Buffer'])) {
+        $data = json_decode($JSONString, true);
+        if (!is_array($data)) {
+            $this->SendDebug('❌ ReceiveData invalid JSON', json_last_error_msg(), 0);
             return '';
         }
+
+        if (!isset($data['Buffer'])) {
+            $this->SendDebug('⚠️ ReceiveData missing Buffer', json_encode($data), 0);
+            return '';
+        }
+
+        $this->SendDebug('🔎 ReceiveData Buffer', (string)$data['Buffer'], 0);
 
         switch ($data['Buffer']) {
             case 'GetAutomations':
                 $response = $this->ReadPropertyString("Automations");
-                $this->SendDebug("Response GetAutomations", $response, 0);
+                $this->DebugResponse("GetAutomations", $response);
                 return $response;
             case 'GetSwitches':
                 $response = $this->ReadPropertyString("Switches");
-                $this->SendDebug("Response GetSwitches", $response, 0);
+                $this->DebugResponse("GetSwitches", $response);
                 return $response;
             case 'GetLights':
                 $response = $this->ReadPropertyString("Lights");
-                $this->SendDebug("Response GetLights", $response, 0);
+                $this->DebugResponse("GetLights", $response);
                 return $response;
             case 'GetTemperatureSensors':
                 $response = $this->ReadPropertyString("TemperatureSensor");
-                $this->SendDebug("Response GetTemperatureSensor", $response, 0);
+                $this->DebugResponse("GetTemperatureSensors", $response);
                 return $response;
             case 'GetBatterySensors':
                 $response = $this->ReadPropertyString("BatterySensor");
-                $this->SendDebug("Response GetBatterySensor", $response, 0);
+                $this->DebugResponse("GetBatterySensors", $response);
                 return $response;
             case 'GetMotionSensors':
                 $response = $this->ReadPropertyString("MotionSensor");
-                $this->SendDebug("Response GetMotionSensor", $response, 0);
+                $this->DebugResponse("GetMotionSensors", $response);
                 return $response;
             case 'GetIlluminanceSensors':
                 $response = $this->ReadPropertyString("IlluminanceSensor");
-                $this->SendDebug("Response GetIlluminanceSensor", $response, 0);
+                $this->DebugResponse("GetIlluminanceSensors", $response);
                 return $response;
             case 'GetMediaPlayers':
                 $response = $this->ReadPropertyString("MediaPlayer");
-                $this->SendDebug("Response GetMediaPlayers", $response, 0);
+                $this->DebugResponse("GetMediaPlayers", $response);
                 return $response;
         }
 
+        $this->SendDebug('⚠️ ReceiveData unknown Buffer', (string)$data['Buffer'], 0);
         return '';
+    }
+
+    private function DebugResponse(string $method, string $response): void
+    {
+        $decoded = json_decode($response, true);
+        $this->SendDebug('📤 Response ' . $method, json_encode([
+            'json_valid' => is_array($decoded),
+            'count' => is_array($decoded) ? count($decoded) : null,
+            'length' => strlen($response),
+            'preview' => mb_substr($response, 0, 1000)
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0);
     }
 
     private function ExtractCheckedValue($checked): bool

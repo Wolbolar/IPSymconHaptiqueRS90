@@ -85,6 +85,7 @@ trait DebugTrait
     public const TOPIC_ENTITY = 'ENTITY';
     public const TOPIC_VM = 'VM';
     public const TOPIC_DISCOVERY = 'DISCOVERY';
+    public const TOPIC_HA = 'HA';
     public const TOPIC_API = 'API';
     public const TOPIC_FORM = 'FORM';
     public const TOPIC_EXT = 'EXT';
@@ -169,6 +170,7 @@ trait DebugTrait
             self::TOPIC_ENTITY => 'Entity updates sent to Remote 3',
             self::TOPIC_VM => 'Variable/MessageSink processing',
             self::TOPIC_DISCOVERY => 'Discovery / device mapping helpers',
+            self::TOPIC_HA => 'Home Assistant emulation requests / routing / responses',
             self::TOPIC_API => 'Remote API calls',
             self::TOPIC_FORM => 'Form/UI helpers / sessions list',
             self::TOPIC_EXT => 'Extended / verbose debug',

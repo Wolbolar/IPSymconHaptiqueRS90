@@ -9,6 +9,8 @@ declare(strict_types=1);
 //include_once __DIR__ . '/simulate.php';
 require_once __DIR__ . '/../libs/WebSocketUtils.php';
 require_once __DIR__ . '/../libs/DenonMarantzAVRModels.php';  // diverse Klassen
+require_once __DIR__ . '/../libs/HomeAssistantEmulator.php';
+require_once __DIR__ . '/../libs/HaptiqueMdnsDiscovery.php';
 
 include_once __DIR__ . '/../libs/ClientSessionManagement.php';
 require_once __DIR__ . '/../libs/DebugTrait.php';
@@ -28,6 +30,9 @@ class HaptiqueSplitter extends IPSModuleStrict
     const Haptique_Driver_Version = "0.2.0";
     const BASE_URL = "https://app.cantatacs.com";
 
+    private ?HomeAssistantEmulator $homeAssistantEmulator = null;
+    private ?HaptiqueMdnsDiscovery $mdnsDiscovery = null;
+
     public function GetCompatibleParents(): string
     {
         return json_encode([
@@ -42,11 +47,13 @@ class HaptiqueSplitter extends IPSModuleStrict
         parent::Create();
 
         $this->RegisterPropertyBoolean('EmulateHomeAssistant', true); // IP-Symcon sendet Antworten als Home Assistant true
+        $this->RegisterPropertyBoolean('EmulateHomeAssistantDiscovery', true);
         $this->RegisterPropertyString('Token', '');
         $this->RegisterAttributeString('ClientIP', '');
         $this->RegisterAttributeInteger('ClientPort', 0);
         $this->RegisterAttributeString('DataID', '');
         $this->RegisterAttributeInteger('Type', 0);
+        $this->RegisterAttributeString('HAWebSocketSubscriptions', '[]');
         $this->RegisterAttributeString('previousTree', '[]');
         $this->RegisterAttributeString('LastHarmonyPlayState', '');
         $this->RegisterAttributeString('AVDevicesTree', "[]");
@@ -959,44 +966,136 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
         $this->DebugExtended(__FUNCTION__, '✅ JSON erfolgreich dekodiert', 0);
 
-        if (mb_check_encoding($data['Buffer'], 'UTF-8')) {
-            // Umwandeln in 1-Byte-Encoding für substr/ord/etc.
-            $payload = mb_convert_encoding($data['Buffer'], 'ISO-8859-1', 'UTF-8');
-        } else {
-            $payload = $data['Buffer']; // wahrscheinlich schon ISO
-        }
+        $payloadInfo = $this->DecodeHexSocketPayload((string)($data['Buffer'] ?? ''));
+        $payload = $payloadInfo['payload'];
 
         // Extract and typecast Type from incoming JSON data
         $type = intval($data['Type'] ?? -1);
         switch ($type) {
             case self::Socket_Data: // Data
-                $this->DebugExtended(__FUNCTION__, "🟢 WebSocket Type: Data", 0);
+                $this->DebugExtended(__FUNCTION__, "🟢 Socket Type: Data", 0);
                 break;
             case self::Socket_Connected: // Connected
-                $this->DebugExtended(__FUNCTION__, "🟢 WebSocket Type: Connected", 0);
+                $this->DebugExtended(__FUNCTION__, "🟢 Socket Type: Connected", 0);
                 break;
             case self::Socket_Disconnected: // Disconnected
-                $this->DebugExtended(__FUNCTION__, "🟠 WebSocket Type: Disconnected", 0);
+                $this->DebugExtended(__FUNCTION__, "🟠 Socket Type: Disconnected", 0);
+                if (isset($data['ClientIP'], $data['ClientPort'])) {
+                    $this->RemoveHomeAssistantWebSocketSubscription((string)$data['ClientIP'], (int)$data['ClientPort']);
+                }
                 break;
             default:
-                $this->DebugExtended(__FUNCTION__, "⚠️ WebSocket Type: Unbekannt ($type)", 0);
+                $this->DebugExtended(__FUNCTION__, "⚠️ Socket Type: Unbekannt ($type)", 0);
                 break;
         }
 
         $clientIP = $data['ClientIP'];
         $clientPort = intval($data['ClientPort']);
-        // Übergabe des Puffers zur Verarbeitung, wenn Buffer nicht leer ist
-        $this->handleRequest($payload);
+
         $this->WriteAttributeString('ClientIP', $clientIP);
         $this->WriteAttributeInteger('ClientPort', $clientPort);
 
-        $this->SendDataToChildren(json_encode([
-            'DataID' => '{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}',
-            'Buffer' => $payload,
-            'ClientIP' => $clientIP,
-            'ClientPort' => $clientPort
-        ]));
+        $this->HA_Debug(self::TOPIC_IO, '📥 Socket data received', self::LV_INFO, [
+            'client' => $clientIP . ':' . $clientPort,
+            'type' => $type,
+            'encoding' => $payloadInfo['encoding'],
+            'raw_length' => $payloadInfo['raw_length'],
+            'payload_length' => strlen($payload),
+            'payload_hex_preview' => bin2hex(substr($payload, 0, 120)),
+            'payload_preview' => mb_substr($payload, 0, 1000)
+        ]);
+
+        if ($payload === '') {
+            return '';
+        }
+
+        if ($this->IsHttpPayload($payload)) {
+            $this->handleRequest($payload, $clientIP, $clientPort);
+        } elseif ($this->IsWebSocketFrame($payload)) {
+            $this->HandleHomeAssistantWebSocketFrame($payload, $clientIP, $clientPort);
+        } else {
+            $this->HA_Debug(self::TOPIC_IO, '⚠️ Socket payload is neither HTTP nor WebSocket', self::LV_WARN, [
+                'client' => $clientIP . ':' . $clientPort,
+                'payload_length' => strlen($payload),
+                'payload_hex_preview' => bin2hex(substr($payload, 0, 120)),
+                'payload_preview' => mb_substr($payload, 0, 1000)
+            ]);
+            $this->SendDataToChildren(json_encode([
+                'DataID' => '{1025873A-EDF7-BF8E-0337-7C6409CAA9F4}',
+                'Buffer' => $payload,
+                'ClientIP' => $clientIP,
+                'ClientPort' => $clientPort
+            ]));
+        }
         return '';
+    }
+
+    private function DecodeHexSocketPayload(string $hexPayload): array
+    {
+        $trimmed = trim($hexPayload);
+
+        if ($trimmed === '') {
+            return [
+                'payload' => '',
+                'encoding' => 'empty',
+                'raw_length' => strlen($hexPayload)
+            ];
+        }
+
+        if (strlen($trimmed) % 2 !== 0 || preg_match('/^[0-9A-Fa-f]+$/', $trimmed) !== 1) {
+            $this->HA_Debug(self::TOPIC_IO, '⚠️ Socket buffer is not valid hex', self::LV_WARN, [
+                'raw_length' => strlen($hexPayload),
+                'raw_preview' => mb_substr($hexPayload, 0, 1000)
+            ]);
+
+            return [
+                'payload' => '',
+                'encoding' => 'invalid-hex',
+                'raw_length' => strlen($hexPayload)
+            ];
+        }
+
+        $decoded = @hex2bin($trimmed);
+        if (!is_string($decoded)) {
+            $this->HA_Debug(self::TOPIC_IO, '⚠️ hex2bin failed for socket buffer', self::LV_WARN, [
+                'raw_length' => strlen($hexPayload),
+                'raw_preview' => mb_substr($hexPayload, 0, 1000)
+            ]);
+
+            return [
+                'payload' => '',
+                'encoding' => 'hex-decode-failed',
+                'raw_length' => strlen($hexPayload)
+            ];
+        }
+
+        return [
+            'payload' => $decoded,
+            'encoding' => 'hex',
+            'raw_length' => strlen($hexPayload)
+        ];
+    }
+
+    private function IsHttpPayload(string $payload): bool
+    {
+        return preg_match('/^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\\s+/i', $payload) === 1;
+    }
+
+    private function IsWebSocketFrame(string $payload): bool
+    {
+        if (strlen($payload) < 2) {
+            return false;
+        }
+
+        $opcode = ord($payload[0]) & 0x0F;
+        return in_array($opcode, [
+            \WebSocketUtils::OPCODE_CONTINUATION,
+            \WebSocketUtils::OPCODE_TEXT,
+            \WebSocketUtils::OPCODE_BINARY,
+            \WebSocketUtils::OPCODE_CLOSE,
+            \WebSocketUtils::OPCODE_PING,
+            \WebSocketUtils::OPCODE_PONG
+        ], true);
     }
 
     private function DebugLog(string $message, $data, int $format = 0, int $level = self::LV_INFO, string $topic = self::TOPIC_GEN): void
@@ -1009,6 +1108,58 @@ class HaptiqueSplitter extends IPSModuleStrict
         if ($this->ReadPropertyBoolean('extended_debug')) {
             $this->Debug($message, $level, $topic, $data, $format);
         }
+    }
+
+    public function HA_GetConfiguratorData(string $method): array
+    {
+        $data = $this->GetDataFromConfigurator($method);
+        if ($data !== []) {
+            $this->HA_Debug(self::TOPIC_ENTITY, '📦 Configurator data from child response', self::LV_INFO, [
+                'method' => $method,
+                'count' => count($data)
+            ]);
+            return $data;
+        }
+
+        $fallback = $this->GetImportConfiguratorData($method);
+        $this->HA_Debug(self::TOPIC_ENTITY, '📦 Configurator data from import configurator fallback', self::LV_INFO, [
+            'method' => $method,
+            'count' => count($fallback)
+        ]);
+        return $fallback;
+    }
+
+    public function HA_Debug(string $topic, string $message, int $level = self::LV_INFO, $data = ''): void
+    {
+        $topic = strtoupper(trim($topic));
+        if ($topic === '') {
+            $topic = self::TOPIC_HA;
+        }
+
+        if (!is_string($data)) {
+            $encoded = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $data = $encoded === false ? '[unserializable]' : $encoded;
+        }
+
+        $this->Debug($message, $level, $topic, $data, 0);
+    }
+
+    private function HomeAssistantEmulator(): HomeAssistantEmulator
+    {
+        if ($this->homeAssistantEmulator === null) {
+            $this->homeAssistantEmulator = new HomeAssistantEmulator($this);
+        }
+
+        return $this->homeAssistantEmulator;
+    }
+
+    private function MdnsDiscovery(): HaptiqueMdnsDiscovery
+    {
+        if ($this->mdnsDiscovery === null) {
+            $this->mdnsDiscovery = new HaptiqueMdnsDiscovery($this);
+        }
+
+        return $this->mdnsDiscovery;
     }
 
     public function ProcessHookData(): void
@@ -1371,15 +1522,25 @@ class HaptiqueSplitter extends IPSModuleStrict
         return $token;
     }
 
-    private function processReceivedData($data)
+    private function processReceivedData($data, string $clientIP, int $clientPort)
     {
-        // Beispiel für Debugging und Verarbeitung
-        $this->DebugLog('Process Data', $data, 0);
+        $requestLine = strtok((string)$data, "\r\n") ?: '';
+        $this->HA_Debug(self::TOPIC_HA, '🔎 Processing HA HTTP request', self::LV_INFO, [
+            'request_line' => $requestLine,
+            'length' => strlen((string)$data)
+        ]);
 
         if (preg_match('#GET /api/websocket HTTP/1.1.*Sec-WebSocket-Key: ([^\r\n]+)#is', $data, $matches)) {
             $secWebSocketKey = trim($matches[1]);
-            $this->DebugLog(__FUNCTION__, "WebSocket Upgrade Request mit Key: $secWebSocketKey", 0);
-            $this->sendWebSocketHandshakeResponse($secWebSocketKey);
+            $this->HA_Debug(self::TOPIC_WS, '🔌 WebSocket upgrade request', self::LV_INFO, [
+                'sec_websocket_key_length' => strlen($secWebSocketKey)
+            ]);
+            $this->sendWebSocketHandshakeResponse($secWebSocketKey, $clientIP, $clientPort);
+            $this->SendHomeAssistantWebSocketJson([
+                'type' => 'auth_required',
+                'ha_version' => '2024.1.0'
+            ], $clientIP, $clientPort, 'HA WS auth_required');
+            return;
         }
 
         // Extrahiere den Header-Teil der Anfrage (Buffer)
@@ -1391,30 +1552,40 @@ class HaptiqueSplitter extends IPSModuleStrict
             if (strpos($line, 'Authorization: Bearer ') === 0) {
                 // Token extrahieren
                 $token = substr($line, 22); // Entfernt 'Authorization: Bearer '
-                $this->DebugLog('Process Data', 'Gefundener Token: ' . $token, 0);
+                $this->HA_Debug(self::TOPIC_AUTH, '🔑 Bearer token found', self::LV_INFO, [
+                    'token_length' => strlen(trim($token))
+                ]);
 
                 // Vergleiche den Token mit dem gespeicherten
                 $storedToken = $this->ReadPropertyString('Token');
                 if (trim($token) !== trim($storedToken)) {
-                    $this->DebugLog('Stored Token', 'Gespeicherter Token: ' . $storedToken, 0);
-                    $this->DebugLog('Process Data', 'Ungültiger Token: ' . $token, 0);
+                    $this->HA_Debug(self::TOPIC_AUTH, '❌ Invalid bearer token', self::LV_WARN, [
+                        'received_token_length' => strlen(trim($token)),
+                        'stored_token_length' => strlen(trim($storedToken))
+                    ]);
+                    $this->sendHttpResponseObject(HaptiqueHttpResponse::error(401, 'Unauthorized'), $clientIP, $clientPort);
                     return;  // Ungültiger Token -> Verarbeitung abbrechen
                 }
             }
         }
 
-        // Falls kein Token gefunden wurde, Debug ausgeben und blockieren
+        // Die Haptique App fragt beim Pairing nach einem Token, sendet bei GET /api/states
+        // in den bisherigen Tests aber keinen Bearer-Header. Wir lassen fehlende Bearer-
+        // Tokens fuer die HA-Emulation daher durch und loggen es sichtbar.
         if (empty($token)) {
-            $this->DebugLog('Process Data', 'Kein Token gefunden', 0);
-            return; // Kein Token -> Verarbeitung abbrechen
+            $this->HA_Debug(self::TOPIC_AUTH, '⚠️ No bearer token found, continuing HA emulation request', self::LV_WARN, [
+                'request_line' => $requestLine
+            ]);
         }
 
         // Home Assistant Emulation oder IP-Symcon Antwort
         $emulation = $this->ReadPropertyBoolean('EmulateHomeAssistant');
-        $this->DebugLog('Emulation', 'Home Assistant Emulation: ' . ($emulation ? 'Aktiviert' : 'Deaktiviert'), 0);
+        $this->HA_Debug(self::TOPIC_HA, '🏠 Home Assistant emulation mode', self::LV_INFO, [
+            'enabled' => $emulation
+        ]);
         if ($emulation) {
             // Antworte im Home Assistant Stil
-            $this->sendHomeAssistantResponse($data);
+            $this->sendHomeAssistantResponse($data, $clientIP, $clientPort);
         } else {
             // Antworte im IP-Symcon Stil
             $this->sendIPSymconResponse($data);
@@ -1427,7 +1598,7 @@ class HaptiqueSplitter extends IPSModuleStrict
         return base64_encode(sha1($key . $GUID, true));
     }
 
-    private function sendWebSocketHandshakeResponse(string $secWebSocketKey): void
+    private function sendWebSocketHandshakeResponse(string $secWebSocketKey, string $clientIP, int $clientPort): void
     {
         $acceptKey = $this->buildWebSocketAcceptKey($secWebSocketKey);
         $response = "HTTP/1.1 101 Switching Protocols\r\n" .
@@ -1438,44 +1609,585 @@ class HaptiqueSplitter extends IPSModuleStrict
         $this->DebugLog(__FUNCTION__, 'Sende WebSocket Handshake-Antwort', 0);
 
 
-        // Lies die ClientIP und den ClientPort aus den Attributen
-        $ClientIP = $this->ReadAttributeString('ClientIP');
-        $ClientPort = $this->ReadAttributeInteger('ClientPort');
-
-        // Sende die Antwort über den Parent (ServerSocket)
-        $this->SendDataToParent(json_encode([
-            'DataID' => '{C8792760-65CF-4C53-B5C7-A30FCC84FEFE}',  // Standard-ID für die Kommunikation mit Sockets
-            'Buffer' => $response,  // Websocket Response
-            'ClientIP' => $ClientIP,  // IP-Adresse des Clients
-            'ClientPort' => $ClientPort  // Port des Clients
-        ]));
+        $this->SendToServerSocket($response, $clientIP, $clientPort, 'WS handshake');
     }
 
-    private function handleRequest($data)
+    private function HandleHomeAssistantWebSocketFrame(string $payload, string $clientIP, int $clientPort): void
     {
-        // Lese den bisherigen Puffer aus (Attribut anstelle von RegisterVariable)
-        $buffer = $this->GetBuffer('ReceiveBuffer');
+        $frame = \WebSocketUtils::UnpackData($payload);
+        if ($frame === null) {
+            $this->HA_Debug(self::TOPIC_WS, '⚠️ Invalid WebSocket frame', self::LV_WARN, [
+                'client' => $clientIP . ':' . $clientPort,
+                'payload_length' => strlen($payload),
+                'payload_hex_preview' => bin2hex(substr($payload, 0, 80))
+            ]);
+            return;
+        }
+
+        $this->HA_Debug(self::TOPIC_WS, '📥 HA WebSocket frame received', self::LV_INFO, [
+            'client' => $clientIP . ':' . $clientPort,
+            'opcode' => $frame['opcode_name'],
+            'fin' => $frame['fin'],
+            'masked' => $frame['masked'],
+            'payload_length' => $frame['payloadLen'],
+            'raw_length' => strlen($payload),
+            'raw_hex_preview' => bin2hex(substr($payload, 0, 120)),
+            'payload_preview' => mb_substr((string)$frame['payload'], 0, 1000)
+        ]);
+
+        if ($frame['opcode'] === \WebSocketUtils::OPCODE_PING) {
+            $this->SendToServerSocket(\WebSocketUtils::PackPong(), $clientIP, $clientPort, 'HA WS pong');
+            return;
+        }
+
+        if ($frame['opcode'] === \WebSocketUtils::OPCODE_CLOSE) {
+            $this->HA_Debug(self::TOPIC_WS, '🔌 HA WebSocket close received', self::LV_INFO, [
+                'client' => $clientIP . ':' . $clientPort
+            ]);
+            $this->RemoveHomeAssistantWebSocketSubscription($clientIP, $clientPort);
+            return;
+        }
+
+        if ($frame['opcode'] !== \WebSocketUtils::OPCODE_TEXT) {
+            $this->HA_Debug(self::TOPIC_WS, '⚠️ Unsupported HA WebSocket opcode', self::LV_WARN, [
+                'client' => $clientIP . ':' . $clientPort,
+                'opcode' => $frame['opcode_name']
+            ]);
+            return;
+        }
+
+        $message = json_decode((string)$frame['payload'], true);
+        if (!is_array($message)) {
+            $this->HA_Debug(self::TOPIC_WS, '⚠️ HA WebSocket JSON decode failed', self::LV_WARN, [
+                'client' => $clientIP . ':' . $clientPort,
+                'error' => json_last_error_msg(),
+                'payload_preview' => mb_substr((string)$frame['payload'], 0, 1000)
+            ]);
+            return;
+        }
+
+        $debugMessage = $message;
+        if (isset($debugMessage['access_token'])) {
+            $debugMessage['access_token'] = '[redacted, length=' . strlen((string)$message['access_token']) . ']';
+        }
+        $this->HA_Debug(self::TOPIC_WS, '📥 HA WebSocket message', self::LV_INFO, $debugMessage);
+
+        try {
+            $this->HandleHomeAssistantWebSocketMessage($message, $clientIP, $clientPort);
+        } catch (\Throwable $e) {
+            $this->HA_Debug(self::TOPIC_WS, '❌ HA WebSocket message handling failed', self::LV_ERROR, [
+                'client' => $clientIP . ':' . $clientPort,
+                'type' => $message['type'] ?? null,
+                'id' => $message['id'] ?? null,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function HandleHomeAssistantWebSocketMessage(array $message, string $clientIP, int $clientPort): void
+    {
+        $type = (string)($message['type'] ?? '');
+        $id = isset($message['id']) ? (int)$message['id'] : null;
+
+        switch ($type) {
+            case 'auth':
+                $receivedToken = trim((string)($message['access_token'] ?? ''));
+                $storedToken = trim($this->ReadPropertyString('Token'));
+                if ($storedToken !== '' && $receivedToken !== $storedToken) {
+                    $this->HA_Debug(self::TOPIC_AUTH, '❌ Invalid HA WebSocket token', self::LV_WARN, [
+                        'client' => $clientIP . ':' . $clientPort,
+                        'received_token_length' => strlen($receivedToken),
+                        'stored_token_length' => strlen($storedToken)
+                    ]);
+                    $this->SendHomeAssistantWebSocketJson([
+                        'type' => 'auth_invalid',
+                        'message' => 'Invalid access token'
+                    ], $clientIP, $clientPort, 'HA WS auth_invalid');
+                    return;
+                }
+
+                $this->SendHomeAssistantWebSocketJson([
+                    'type' => 'auth_ok',
+                    'ha_version' => '2024.1.0'
+                ], $clientIP, $clientPort, 'HA WS auth_ok');
+                return;
+
+            case 'get_states':
+                $this->SendHomeAssistantWebSocketJson([
+                    'id' => $id,
+                    'type' => 'result',
+                    'success' => true,
+                    'result' => $this->GetHomeAssistantStates()
+                ], $clientIP, $clientPort, 'HA WS get_states result');
+                return;
+
+            case 'subscribe_events':
+                $eventType = (string)($message['event_type'] ?? 'state_changed');
+                $this->RememberHomeAssistantWebSocketSubscription($clientIP, $clientPort, (int)$id, [
+                    'mode' => 'events',
+                    'event_type' => $eventType,
+                    'entity_ids' => []
+                ]);
+                $this->SendHomeAssistantWebSocketJson([
+                    'id' => $id,
+                    'type' => 'result',
+                    'success' => true,
+                    'result' => null
+                ], $clientIP, $clientPort, 'HA WS subscribe_events result');
+                return;
+
+            case 'subscribe_trigger':
+                $entityIds = $this->ExtractEntityIdsFromHomeAssistantTrigger($message['trigger'] ?? null);
+                $this->HA_Debug(self::TOPIC_WS, '🔔 HA WebSocket trigger subscribe request', self::LV_INFO, [
+                    'client' => $clientIP . ':' . $clientPort,
+                    'id' => $id,
+                    'entity_ids' => $entityIds,
+                    'trigger' => $message['trigger'] ?? null
+                ]);
+                $this->RememberHomeAssistantWebSocketSubscription($clientIP, $clientPort, (int)$id, [
+                    'mode' => 'trigger',
+                    'event_type' => 'state_changed',
+                    'entity_ids' => $entityIds
+                ]);
+                $this->HA_Debug(self::TOPIC_WS, '🔔 HA WebSocket trigger subscribed', self::LV_INFO, [
+                    'client' => $clientIP . ':' . $clientPort,
+                    'id' => $id,
+                    'entity_ids' => $entityIds
+                ]);
+                $this->SendHomeAssistantWebSocketJson([
+                    'id' => $id,
+                    'type' => 'result',
+                    'success' => true,
+                    'result' => null
+                ], $clientIP, $clientPort, 'HA WS subscribe_trigger result');
+                return;
+
+            case 'ping':
+                $this->SendHomeAssistantWebSocketJson([
+                    'id' => $id,
+                    'type' => 'pong'
+                ], $clientIP, $clientPort, 'HA WS pong message');
+                return;
+
+            case 'call_service':
+                $this->HandleHomeAssistantWebSocketServiceCall($message, $clientIP, $clientPort);
+                return;
+
+            default:
+                $this->HA_Debug(self::TOPIC_WS, '⚠️ Unsupported HA WebSocket message type', self::LV_WARN, [
+                    'client' => $clientIP . ':' . $clientPort,
+                    'type' => $type,
+                    'id' => $id
+                ]);
+                if ($id !== null) {
+                    $this->SendHomeAssistantWebSocketJson([
+                        'id' => $id,
+                        'type' => 'result',
+                        'success' => false,
+                        'error' => [
+                            'code' => 'unknown_command',
+                            'message' => 'Unsupported message type: ' . $type
+                        ]
+                    ], $clientIP, $clientPort, 'HA WS unsupported result');
+                }
+        }
+    }
+
+    private function HandleHomeAssistantWebSocketServiceCall(array $message, string $clientIP, int $clientPort): void
+    {
+        $id = isset($message['id']) ? (int)$message['id'] : null;
+        $domain = (string)($message['domain'] ?? '');
+        $service = (string)($message['service'] ?? '');
+        $serviceData = is_array($message['service_data'] ?? null) ? $message['service_data'] : [];
+
+        if (isset($message['target']) && is_array($message['target'])) {
+            $serviceData = array_merge($serviceData, $message['target']);
+        }
+
+        $entityIds = $this->NormalizeHomeAssistantEntityIds($serviceData['entity_id'] ?? null);
+        $oldStates = [];
+        foreach ($entityIds as $entityId) {
+            $oldStates[$entityId] = $this->GetHomeAssistantState($entityId);
+        }
+
+        $body = json_encode($serviceData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($body)) {
+            $body = '{}';
+        }
+
+        $rawRequest = "POST /api/services/" . rawurlencode($domain) . "/" . rawurlencode($service) . " HTTP/1.1\r\n" .
+            "Content-Type: application/json\r\n" .
+            "Content-Length: " . strlen($body) . "\r\n\r\n" .
+            $body;
+
+        $this->HA_Debug(self::TOPIC_CMD, '📥 HA WebSocket service call', self::LV_INFO, [
+            'id' => $id,
+            'domain' => $domain,
+            'service' => $service,
+            'entity_ids' => $entityIds,
+            'service_data' => $serviceData
+        ]);
+
+        $response = $this->HomeAssistantEmulator()->handleRawHttpRequest($rawRequest);
+        $responseBody = $response->getBody();
+        $decodedResult = json_decode($responseBody, true);
+        $success = $response->getStatusCode() >= 200 && $response->getStatusCode() < 300;
+
+        $this->SendHomeAssistantWebSocketJson([
+            'id' => $id,
+            'type' => 'result',
+            'success' => $success,
+            'result' => is_array($decodedResult) ? $decodedResult : $responseBody
+        ], $clientIP, $clientPort, 'HA WS call_service result');
+
+        if (!$success) {
+            return;
+        }
+
+        foreach ($entityIds as $entityId) {
+            $this->SendHomeAssistantStateChangedEvent(
+                $entityId,
+                is_array($oldStates[$entityId] ?? null) ? $oldStates[$entityId] : null,
+                $this->GetHomeAssistantState($entityId),
+                $clientIP,
+                $clientPort
+            );
+        }
+    }
+
+    private function SendHomeAssistantWebSocketJson(array $payload, string $clientIP, int $clientPort, string $context): void
+    {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($json)) {
+            $json = '{"type":"error","message":"json_encode failed"}';
+        }
+
+        $this->HA_Debug(self::TOPIC_WS, '📤 HA WebSocket message sent', self::LV_INFO, [
+            'context' => $context,
+            'client' => $clientIP . ':' . $clientPort,
+            'payload_preview' => mb_substr($json, 0, 1000),
+            'payload_length' => strlen($json)
+        ]);
+
+        $this->SendToServerSocket(\WebSocketUtils::PackData($json), $clientIP, $clientPort, $context);
+    }
+
+    private function GetHomeAssistantStates(): array
+    {
+        return $this->HomeAssistantEmulator()->getStates();
+    }
+
+    private function GetHomeAssistantState(string $entityId): ?array
+    {
+        return $this->HomeAssistantEmulator()->getState($entityId);
+    }
+
+    private function SendHomeAssistantStateChangedEvent(string $entityId, ?array $oldState, ?array $newState, string $clientIP, int $clientPort): void
+    {
+        if ($newState === null) {
+            return;
+        }
+
+        $subscription = $this->GetHomeAssistantWebSocketSubscription($clientIP, $clientPort);
+        if ($subscription === null) {
+            $this->HA_Debug(self::TOPIC_WS, '⚠️ No HA WebSocket state_changed subscription found', self::LV_WARN, [
+                'client' => $clientIP . ':' . $clientPort,
+                'entity_id' => $entityId
+            ]);
+            return;
+        }
+
+        $this->SendHomeAssistantSubscriptionEvent($subscription, $entityId, $oldState, $newState, $clientIP, $clientPort);
+    }
+
+    private function SendHomeAssistantSubscriptionEvent(array $subscription, string $entityId, ?array $oldState, array $newState, string $clientIP, int $clientPort): void
+    {
+        $subscriptionID = (int)($subscription['id'] ?? 0);
+        if ($subscriptionID <= 0) {
+            return;
+        }
+
+        $mode = (string)($subscription['mode'] ?? 'events');
+        $subscribedEntityIds = is_array($subscription['entity_ids'] ?? null) ? $subscription['entity_ids'] : [];
+        if ($subscribedEntityIds !== [] && !in_array($entityId, $subscribedEntityIds, true)) {
+            return;
+        }
+
+        if ($mode === 'trigger') {
+            $this->SendHomeAssistantTriggerEvent($subscriptionID, $entityId, $oldState, $newState, $clientIP, $clientPort);
+            return;
+        }
+
+        $this->SendHomeAssistantWebSocketJson([
+            'id' => $subscriptionID,
+            'type' => 'event',
+            'event' => [
+                'event_type' => 'state_changed',
+                'data' => [
+                    'entity_id' => $entityId,
+                    'old_state' => $oldState,
+                    'new_state' => $newState
+                ],
+                'origin' => 'LOCAL',
+                'time_fired' => date('c'),
+                'context' => [
+                    'id' => 'ctx_' . str_replace('.', '_', $entityId) . '_' . time(),
+                    'parent_id' => null,
+                    'user_id' => null
+                ]
+            ]
+        ], $clientIP, $clientPort, 'HA WS state_changed event');
+    }
+
+    private function SendHomeAssistantTriggerEvent(int $subscriptionID, string $entityId, ?array $oldState, array $newState, string $clientIP, int $clientPort): void
+    {
+        $context = is_array($newState['context'] ?? null) ? $newState['context'] : [
+            'id' => $this->CreateHomeAssistantContextID(),
+            'parent_id' => null,
+            'user_id' => null
+        ];
+
+        $this->SendHomeAssistantWebSocketJson([
+            'id' => $subscriptionID,
+            'type' => 'event',
+            'event' => [
+                'variables' => [
+                    'trigger' => [
+                        'id' => '0',
+                        'idx' => '0',
+                        'alias' => null,
+                        'platform' => 'state',
+                        'entity_id' => $entityId,
+                        'from_state' => $oldState,
+                        'to_state' => $newState,
+                        'for' => null,
+                        'attribute' => null,
+                        'description' => 'state of ' . $entityId
+                    ]
+                ],
+                'context' => $context
+            ]
+        ], $clientIP, $clientPort, 'HA WS trigger event');
+    }
+
+    private function BroadcastHomeAssistantStateChangedEvents(array $entityIds, array $oldStates): void
+    {
+        $subscriptions = $this->ReadHomeAssistantWebSocketSubscriptions();
+        if ($subscriptions === []) {
+            $this->HA_Debug(self::TOPIC_WS, '⚠️ No HA WebSocket subscriptions for REST state update', self::LV_WARN, [
+                'entity_ids' => $entityIds
+            ]);
+            return;
+        }
+
+        $this->HA_Debug(self::TOPIC_WS, '📣 Broadcasting HA WebSocket state update', self::LV_INFO, [
+            'entity_ids' => $entityIds,
+            'subscription_count' => count($subscriptions),
+            'clients' => array_keys($subscriptions)
+        ]);
+
+        foreach ($subscriptions as $client => $subscription) {
+            if (!is_array($subscription)) {
+                continue;
+            }
+
+            $mode = (string)($subscription['mode'] ?? 'events');
+            $eventType = (string)($subscription['event_type'] ?? '');
+            if ($mode === 'events' && $eventType !== '' && $eventType !== 'state_changed') {
+                continue;
+            }
+
+            $separator = strrpos((string)$client, ':');
+            if ($separator === false) {
+                continue;
+            }
+
+            $clientIP = substr((string)$client, 0, $separator);
+            $clientPort = (int)substr((string)$client, $separator + 1);
+            foreach ($entityIds as $entityId) {
+                $newState = $this->GetHomeAssistantState((string)$entityId);
+                if ($newState === null) {
+                    continue;
+                }
+
+                $this->SendHomeAssistantSubscriptionEvent(
+                    $subscription,
+                    (string)$entityId,
+                    is_array($oldStates[$entityId] ?? null) ? $oldStates[$entityId] : null,
+                    $newState,
+                    $clientIP,
+                    $clientPort
+                );
+            }
+        }
+    }
+
+    private function ExtractEntityIdsFromHomeAssistantServiceRequest(string $rawRequest): array
+    {
+        $parts = explode("\r\n\r\n", $rawRequest, 2);
+        $headerBlock = $parts[0] ?? '';
+        $body = $parts[1] ?? '';
+        $requestLine = strtok($headerBlock, "\r\n") ?: '';
+
+        if (preg_match('#^POST\s+/api/services/[a-zA-Z0-9_]+/[a-zA-Z0-9_]+\s+#', $requestLine) !== 1) {
+            return [];
+        }
+
+        $payload = json_decode($body, true);
+        if (!is_array($payload)) {
+            return [];
+        }
+
+        $entityId = $payload['entity_id'] ?? ($payload['target']['entity_id'] ?? null);
+        return $this->NormalizeHomeAssistantEntityIds($entityId);
+    }
+
+    private function ExtractEntityIdsFromHomeAssistantTrigger($trigger): array
+    {
+        if (!is_array($trigger)) {
+            return [];
+        }
+
+        if ($this->IsListArray($trigger)) {
+            $entityIds = [];
+            foreach ($trigger as $singleTrigger) {
+                if (is_array($singleTrigger)) {
+                    $entityIds = array_merge($entityIds, $this->NormalizeHomeAssistantEntityIds($singleTrigger['entity_id'] ?? null));
+                }
+            }
+            return array_values(array_unique($entityIds));
+        }
+
+        return $this->NormalizeHomeAssistantEntityIds($trigger['entity_id'] ?? null);
+    }
+
+    private function IsListArray(array $array): bool
+    {
+        if ($array === []) {
+            return true;
+        }
+
+        return array_keys($array) === range(0, count($array) - 1);
+    }
+
+    private function NormalizeHomeAssistantEntityIds($entityIds): array
+    {
+        if (is_string($entityIds)) {
+            return [$entityIds];
+        }
+
+        if (is_array($entityIds)) {
+            return array_values(array_filter(array_map('strval', $entityIds), static fn(string $entityId): bool => $entityId !== ''));
+        }
+
+        return [];
+    }
+
+    private function RememberHomeAssistantWebSocketSubscription(string $clientIP, int $clientPort, int $subscriptionID, array $subscription): void
+    {
+        $subscriptions = $this->ReadHomeAssistantWebSocketSubscriptions();
+        $subscription['id'] = $subscriptionID;
+        $subscriptions[$clientIP . ':' . $clientPort] = $subscription;
+        $encoded = json_encode($subscriptions, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $this->SetBuffer('HAWebSocketSubscriptions', is_string($encoded) ? $encoded : '[]');
+    }
+
+    private function GetHomeAssistantWebSocketSubscription(string $clientIP, int $clientPort): ?array
+    {
+        $subscription = $this->ReadHomeAssistantWebSocketSubscriptions()[$clientIP . ':' . $clientPort] ?? null;
+        if (!is_array($subscription)) {
+            return null;
+        }
+
+        $mode = (string)($subscription['mode'] ?? 'events');
+        $eventType = (string)($subscription['event_type'] ?? '');
+        if ($mode === 'events' && $eventType !== '' && $eventType !== 'state_changed') {
+            return null;
+        }
+
+        return $subscription;
+    }
+
+    private function RemoveHomeAssistantWebSocketSubscription(string $clientIP, int $clientPort): void
+    {
+        $subscriptions = $this->ReadHomeAssistantWebSocketSubscriptions();
+        unset($subscriptions[$clientIP . ':' . $clientPort]);
+        $encoded = json_encode($subscriptions, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $this->SetBuffer('HAWebSocketSubscriptions', is_string($encoded) ? $encoded : '[]');
+    }
+
+    private function ReadHomeAssistantWebSocketSubscriptions(): array
+    {
+        $raw = $this->GetBuffer('HAWebSocketSubscriptions');
+        if (!is_string($raw) || $raw === '') {
+            try {
+                $raw = $this->ReadAttributeString('HAWebSocketSubscriptions');
+            } catch (\Throwable $e) {
+                $raw = '[]';
+            }
+        }
+
+        if (!is_string($raw) || $raw === '') {
+            $raw = '[]';
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function CreateHomeAssistantContextID(): string
+    {
+        return strtoupper(bin2hex(random_bytes(13)));
+    }
+
+    private function handleRequest($data, string $clientIP, int $clientPort)
+    {
+        $bufferName = $this->GetHttpReceiveBufferName($clientIP, $clientPort);
+        $buffer = $this->GetBuffer($bufferName);
 
         // Füge die neuen Daten zum Puffer hinzu
         $buffer .= $data;
 
         // Prüfe, ob das Ende der Anfrage erreicht ist (doppeltes CRLF)
         if (strpos($buffer, "\r\n\r\n") !== false) {
+            $this->HA_Debug(self::TOPIC_IO, '🧩 Complete HTTP request buffered', self::LV_INFO, [
+                'buffer_length' => strlen($buffer),
+                'client' => $clientIP . ':' . $clientPort,
+                'buffer_preview' => mb_substr($buffer, 0, 1000)
+            ]);
+
             // Die vollständigen Daten sind nun im Buffer
-            $this->processReceivedData($buffer);
+            $this->processReceivedData($buffer, $clientIP, $clientPort);
 
             // Puffer leeren, da die Daten verarbeitet wurden
             $buffer = "";
         }
 
         // Speichere den aktuellen Puffer wieder ab
-        $this->SetBuffer('ReceiveBuffer', $buffer);
+        $this->SetBuffer($bufferName, $buffer);
     }
 
-    private function sendHomeAssistantResponse($data)
+    private function GetHttpReceiveBufferName(string $clientIP, int $clientPort): string
+    {
+        return 'ReceiveBuffer_' . substr(sha1($clientIP . ':' . $clientPort), 0, 16);
+    }
+
+    private function sendHomeAssistantResponse($data, string $clientIP, int $clientPort)
     {
         // Antworte im Home Assistant Stil
-        $this->DebugLog(__FUNCTION__, 'Home Assistant Response', 0);
+        $this->HA_Debug(self::TOPIC_HA, '🏠 Home Assistant request received');
+        $entityIds = $this->ExtractEntityIdsFromHomeAssistantServiceRequest((string)$data);
+        $oldStates = [];
+        foreach ($entityIds as $entityId) {
+            $oldStates[$entityId] = $this->GetHomeAssistantState($entityId);
+        }
+
+        $response = $this->HomeAssistantEmulator()->handleRawHttpRequest((string)$data);
+        $this->sendHttpResponseObject($response, $clientIP, $clientPort);
+        if ($response->getStatusCode() >= 200 && $response->getStatusCode() < 300 && $entityIds !== []) {
+            $this->BroadcastHomeAssistantStateChangedEvents($entityIds, $oldStates);
+        }
+        return;
 
         // Zerlege die Anfrage in Header und Body
         list($headers, $body) = explode("\r\n\r\n", $data, 2);
@@ -2407,16 +3119,59 @@ class HaptiqueSplitter extends IPSModuleStrict
         $ClientIP = $this->ReadAttributeString('ClientIP');
         $ClientPort = $this->ReadAttributeInteger('ClientPort');
 
-        // Sende die HTTP-Antwort über den Parent (ServerSocket)
-        $this->SendDataToParent(json_encode([
-            'DataID' => '{C8792760-65CF-4C53-B5C7-A30FCC84FEFE}',  // Standard-ID für die Kommunikation mit Sockets
-            'Buffer' => mb_convert_encoding($httpResponse, 'UTF-8', 'ISO-8859-1'),  // HTTP-Antwort als Buffer
-            'ClientIP' => $ClientIP,  // IP-Adresse des Clients
-            'ClientPort' => $ClientPort  // Port des Clients
-        ]));
+        $this->SendToServerSocket($httpResponse, $ClientIP, $ClientPort, 'legacy HTTP response');
 
         // Debug-Ausgabe für die gesendete Antwort
         $this->DebugLog('HaptiqueEmulator', 'Antwort gesendet: ' . $httpResponse, 0);
+    }
+
+    private function sendHttpResponseObject(HaptiqueHttpResponse $response, ?string $clientIP = null, ?int $clientPort = null): void
+    {
+        $statusCode = $response->getStatusCode();
+        $statusText = match ($statusCode) {
+            200 => 'OK',
+            400 => 'Bad Request',
+            401 => 'Unauthorized',
+            404 => 'Not Found',
+            500 => 'Internal Server Error',
+            501 => 'Not Implemented',
+            default => 'Response'
+        };
+
+        $body = $response->getBody();
+        $headers = $response->getHeaders();
+        if (!isset($headers['Content-Type'])) {
+            $headers['Content-Type'] = 'application/json';
+        }
+
+        $httpResponse = "HTTP/1.1 $statusCode $statusText\r\n";
+        foreach ($headers as $name => $value) {
+            $httpResponse .= $name . ': ' . $value . "\r\n";
+        }
+        $httpResponse .= 'Content-Length: ' . strlen($body) . "\r\n";
+        $httpResponse .= "Connection: close\r\n\r\n";
+        $httpResponse .= $body;
+
+        $ClientIP = $clientIP ?? $this->ReadAttributeString('ClientIP');
+        $ClientPort = $clientPort ?? $this->ReadAttributeInteger('ClientPort');
+
+        $this->HA_Debug(self::TOPIC_IO, '📤 Preparing HA HTTP response wire', self::LV_INFO, [
+            'status' => $statusCode . ' ' . $statusText,
+            'client' => $ClientIP . ':' . $ClientPort,
+            'content_length' => strlen($body),
+            'wire_length' => strlen($httpResponse)
+        ]);
+
+        $this->SendToServerSocket($httpResponse, $ClientIP, $ClientPort, 'HA HTTP response');
+
+        $this->HA_Debug(self::TOPIC_IO, '📤 HA HTTP response sent', self::LV_INFO, [
+            'status' => $statusCode . ' ' . $statusText,
+            'client' => $ClientIP . ':' . $ClientPort,
+            'content_length' => strlen($body),
+            'wire_length' => strlen($httpResponse),
+            'wire_hex_length' => strlen(bin2hex($httpResponse)),
+            'body_preview' => mb_substr($body, 0, 1000)
+        ]);
     }
 
     private function sendErrorResponse(int $code, string $message): void
@@ -2440,14 +3195,30 @@ class HaptiqueSplitter extends IPSModuleStrict
         $ClientIP = $this->ReadAttributeString('ClientIP');
         $ClientPort = $this->ReadAttributeInteger('ClientPort');
 
-        $this->SendDataToParent(json_encode([
-            'DataID' => '{C8792760-65CF-4C53-B5C7-A30FCC84FEFE}',
-            'Buffer' => mb_convert_encoding($httpResponse, 'UTF-8', 'ISO-8859-1'),
-            'ClientIP' => $ClientIP,
-            'ClientPort' => $ClientPort
-        ]));
+        $this->SendToServerSocket($httpResponse, $ClientIP, $ClientPort, 'legacy error response');
 
         $this->DebugLog('HaptiqueEmulator', "Fehler gesendet: $code $statusText – $message", 0);
+    }
+
+    private function SendToServerSocket(string $payload, string $clientIP, int $clientPort, string $context): void
+    {
+        $packet = [
+            'DataID' => '{C8792760-65CF-4C53-B5C7-A30FCC84FEFE}',
+            'Buffer' => bin2hex($payload),
+            'ClientIP' => $clientIP,
+            'ClientPort' => $clientPort,
+            'Type' => self::Socket_Data
+        ];
+
+        $this->HA_Debug(self::TOPIC_IO, '📤 Sending payload to ServerSocket', self::LV_INFO, [
+            'context' => $context,
+            'client' => $clientIP . ':' . $clientPort,
+            'payload_length' => strlen($payload),
+            'buffer_hex_length' => strlen($packet['Buffer']),
+            'payload_preview' => mb_substr($payload, 0, 1000)
+        ]);
+
+        $this->SendDataToParent(json_encode($packet));
     }
 
     protected function NewIDLightSwitch($LightSwitches)
@@ -2493,58 +3264,16 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function RegisterMdnsService()
     {
-        $this->DebugLog(__FUNCTION__, '🔧 DNS-SD Dienst registrieren', 0);
-
-        $mdnsID = @IPS_GetInstanceListByModuleID('{780B2D48-916C-4D59-AD35-5A429B2355A5}')[0] ?? 0;
-        if ($mdnsID === 0) {
-            $this->DebugLog(__FUNCTION__, '⚠️ Keine DNS-SD Control Instanz gefunden!', 0);
-            return;
-        }
-
-        $entries = json_decode(IPS_GetProperty($mdnsID, 'Services'), true) ?? [];
-
-        $serviceName = 'Symcon';
-        $serviceType = '_cantata-integration._tcp';
-
-        $entries = array_filter($entries, fn($e) => !($e['Name'] === $serviceName && $e['RegType'] === $serviceType)
+        $this->MdnsDiscovery()->register(
+            self::DEFAULT_WS_PORT,
+            self::Haptique_Driver_Version,
+            $this->ReadPropertyBoolean('EmulateHomeAssistantDiscovery')
         );
-
-        $first = $this->GetSymconFirstName();
-
-        $entries[] = [
-            'Name' => $serviceName,
-            'RegType' => $serviceType,
-            'Domain' => '',
-            'Host' => '',
-            'Port' => self::DEFAULT_WS_PORT,
-            'TXTRecords' => [
-                ['Value' => 'name=Symcon von ' . $first],
-                ['Value' => 'ver=' . self::Haptique_Driver_Version],
-                ['Value' => 'developer=Fonzo'],
-                ['Value' => 'pwd=true']
-            ]
-        ];
-
-        IPS_SetProperty($mdnsID, 'Services', json_encode(array_values($entries)));
-        IPS_ApplyChanges($mdnsID);
-
-        $this->DebugLog(__FUNCTION__, '✅ mDNS-Eintrag hinzugefügt: ' . json_encode(end($entries)), 0);
     }
 
     private function UnregisterMdnsService()
     {
-        $mdnsID = @IPS_GetInstanceListByModuleID('{780B2D48-916C-4D59-AD35-5A429B2355A5}')[0] ?? 0;
-        if ($mdnsID === 0) {
-            return;
-        }
-
-        $entries = json_decode(IPS_GetProperty($mdnsID, 'Services'), true) ?? [];
-        $filtered = array_filter($entries, function ($entry) {
-            return $entry['RegType'] !== '_uc-integration._tcp' || $entry['Name'] !== 'Symcon';
-        });
-
-        IPS_SetProperty($mdnsID, 'Services', json_encode(array_values($filtered)));
-        IPS_ApplyChanges($mdnsID);
+        $this->MdnsDiscovery()->unregister();
     }
 
     // Methode zur Überprüfung des Variablentyps
@@ -3168,6 +3897,11 @@ class HaptiqueSplitter extends IPSModuleStrict
                         'type' => 'Button',
                         'caption' => $this->Translate('Generate new token'),
                         'onClick' => 'CRSS_GenerateToken($id);'
+                    ],
+                    [
+                        'type' => 'CheckBox',
+                        'name' => 'EmulateHomeAssistantDiscovery',
+                        'caption' => 'Home Assistant Discovery emulieren'
                     ]
                 ]
             ],
@@ -3438,7 +4172,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                 'items' => [
                     [
                         'type' => 'Label',
-                        'caption' => 'Use filters to reduce debug output to specific entities/IDs/IPs. Example topics: WS, HOOK, ENTITY, VM, AUTH.'
+                        'caption' => 'Use filters to reduce debug output to specific entities/IDs/IPs. Example topics: HA, IO, AUTH, ENTITY, CMD, DISCOVERY.'
                     ],
                     [
                         'type' => 'Select',
@@ -3457,7 +4191,7 @@ class HaptiqueSplitter extends IPSModuleStrict
                         'name' => 'debug_filter_enabled',
                         'caption' => 'Enable filters'
                     ],
-                    // Available topics: GEN, AUTH, HOOK, WS, ENTITY, VM, DISCOVERY, API, FORM, EXT
+                    // Available topics are built from DebugTrait::GetDebugTopicMasterList().
                     [
                         'type' => 'List',
                         'name' => 'debug_topics_cfg',
@@ -4984,7 +5718,10 @@ class HaptiqueSplitter extends IPSModuleStrict
         ]);
 
         $data = $this->SendDataToChildren($payload);  // gibt Array mit 1 Element zurück
-        $this->DebugLog(__FUNCTION__, json_encode($data), 0);
+        $this->HA_Debug(self::TOPIC_ENTITY, '🔎 Configurator child request result', self::LV_INFO, [
+            'method' => $method,
+            'response_count' => is_array($data) ? count($data) : 0
+        ]);
 
         // prüfen, ob Antwort da ist
         if (is_array($data) && isset($data[0])) {
@@ -4995,6 +5732,90 @@ class HaptiqueSplitter extends IPSModuleStrict
         }
 
         return [];
+    }
+
+    private function GetImportConfiguratorData(string $method): array
+    {
+        $propertyByMethod = [
+            'GetAutomations' => 'Automations',
+            'GetSwitches' => 'Switches',
+            'GetLights' => 'Lights',
+            'GetTemperatureSensors' => 'TemperatureSensor',
+            'GetBatterySensors' => 'BatterySensor',
+            'GetMotionSensors' => 'MotionSensor',
+            'GetIlluminanceSensors' => 'IlluminanceSensor',
+            'GetMediaPlayers' => 'MediaPlayer'
+        ];
+
+        $property = $propertyByMethod[$method] ?? '';
+        if ($property === '') {
+            return [];
+        }
+
+        $importConfiguratorID = $this->FindConnectedImportConfiguratorID();
+        if ($importConfiguratorID === 0) {
+            $this->HA_Debug(self::TOPIC_ENTITY, '⚠️ No Haptique Import Configurator selected for fallback', self::LV_WARN, [
+                'method' => $method
+            ]);
+            return [];
+        }
+
+        $raw = IPS_GetProperty($importConfiguratorID, $property);
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            $this->HA_Debug(self::TOPIC_ENTITY, '⚠️ Import Configurator property is not valid JSON', self::LV_WARN, [
+                'instance_id' => $importConfiguratorID,
+                'property' => $property,
+                'raw_preview' => mb_substr($raw, 0, 1000)
+            ]);
+            return [];
+        }
+
+        return $decoded;
+    }
+
+    private function FindConnectedImportConfiguratorID(): int
+    {
+        $instanceIDs = @IPS_GetInstanceListByModuleID('{5D7C18DA-ED94-27CF-6863-0A307AC97175}');
+        if (!is_array($instanceIDs) || $instanceIDs === []) {
+            return 0;
+        }
+
+        $candidates = [];
+        foreach ($instanceIDs as $instanceID) {
+            $instance = @IPS_GetInstance((int)$instanceID);
+            if (!is_array($instance)) {
+                continue;
+            }
+
+            $connectionID = (int)($instance['ConnectionID'] ?? 0);
+            $parentID = (int)($instance['ParentID'] ?? 0);
+            $candidates[] = [
+                'instance_id' => (int)$instanceID,
+                'connection_id' => $connectionID,
+                'parent_id' => $parentID
+            ];
+
+            if ($connectionID === $this->InstanceID || $parentID === $this->InstanceID) {
+                return (int)$instanceID;
+            }
+        }
+
+        if (count($instanceIDs) === 1) {
+            $fallbackID = (int)$instanceIDs[0];
+            $this->HA_Debug(self::TOPIC_ENTITY, '⚠️ Using only Haptique Import Configurator as fallback although parent link was not detected', self::LV_WARN, [
+                'instance_id' => $fallbackID,
+                'splitter_id' => $this->InstanceID,
+                'candidates' => $candidates
+            ]);
+            return $fallbackID;
+        }
+
+        $this->HA_Debug(self::TOPIC_ENTITY, '⚠️ Multiple Haptique Import Configurators found, no parent match', self::LV_WARN, [
+            'splitter_id' => $this->InstanceID,
+            'candidates' => $candidates
+        ]);
+        return 0;
     }
 
     private function GetCompleteHAResponseComplete()
