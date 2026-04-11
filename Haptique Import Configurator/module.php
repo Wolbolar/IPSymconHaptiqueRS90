@@ -1139,6 +1139,24 @@ class HaptiqueImportConfigurator extends IPSModuleStrict
                                             ]
                                         ],
                                         [
+                                            "caption" => "Brightness Variable",
+                                            "name" => "BrightnessVariable",
+                                            "width" => "200px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
+                                            "caption" => "Color Temperature Variable",
+                                            "name" => "ColorTemperatureVariable",
+                                            "width" => "240px",
+                                            "add" => 0,
+                                            'edit' => [
+                                                'type' => 'SelectVariable'
+                                            ]
+                                        ],
+                                        [
                                             "caption" => "Status",
                                             "name" => "State",
                                             "width" => "200px",

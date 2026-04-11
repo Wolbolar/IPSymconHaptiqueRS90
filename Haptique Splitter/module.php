@@ -1888,6 +1888,14 @@ class HaptiqueSplitter extends IPSModuleStrict
             return;
         }
 
+        if (!$this->HasHomeAssistantStateChanged($oldState, $newState)) {
+            $this->HA_Debug(self::TOPIC_WS, '⏭️ Skipping unchanged HA WebSocket state update', self::LV_INFO, [
+                'client' => $clientIP . ':' . $clientPort,
+                'entity_id' => $entityId
+            ]);
+            return;
+        }
+
         $subscription = $this->GetHomeAssistantWebSocketSubscription($clientIP, $clientPort);
         if ($subscription === null) {
             $this->HA_Debug(self::TOPIC_WS, '⚠️ No HA WebSocket state_changed subscription found', self::LV_WARN, [
@@ -1902,6 +1910,14 @@ class HaptiqueSplitter extends IPSModuleStrict
 
     private function SendHomeAssistantSubscriptionEvent(array $subscription, string $entityId, ?array $oldState, array $newState, string $clientIP, int $clientPort): void
     {
+        if (!$this->HasHomeAssistantStateChanged($oldState, $newState)) {
+            $this->HA_Debug(self::TOPIC_WS, '⏭️ Skipping unchanged HA WebSocket subscription event', self::LV_INFO, [
+                'client' => $clientIP . ':' . $clientPort,
+                'entity_id' => $entityId
+            ]);
+            return;
+        }
+
         $subscriptionID = (int)($subscription['id'] ?? 0);
         if ($subscriptionID <= 0) {
             return;
@@ -2010,6 +2026,14 @@ class HaptiqueSplitter extends IPSModuleStrict
                     continue;
                 }
 
+                if (!$this->HasHomeAssistantStateChanged(is_array($oldStates[$entityId] ?? null) ? $oldStates[$entityId] : null, $newState)) {
+                    $this->HA_Debug(self::TOPIC_WS, '⏭️ Skipping unchanged HA REST state update broadcast', self::LV_INFO, [
+                        'client' => $clientIP . ':' . $clientPort,
+                        'entity_id' => (string)$entityId
+                    ]);
+                    continue;
+                }
+
                 $this->SendHomeAssistantSubscriptionEvent(
                     $subscription,
                     (string)$entityId,
@@ -2020,6 +2044,23 @@ class HaptiqueSplitter extends IPSModuleStrict
                 );
             }
         }
+    }
+
+    private function HasHomeAssistantStateChanged(?array $oldState, array $newState): bool
+    {
+        if ($oldState === null) {
+            return true;
+        }
+
+        return $this->GetComparableHomeAssistantState($oldState) !== $this->GetComparableHomeAssistantState($newState);
+    }
+
+    private function GetComparableHomeAssistantState(array $state): array
+    {
+        return [
+            'state' => $state['state'] ?? null,
+            'attributes' => $state['attributes'] ?? []
+        ];
     }
 
     private function ExtractEntityIdsFromHomeAssistantServiceRequest(string $rawRequest): array

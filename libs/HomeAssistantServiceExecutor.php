@@ -37,13 +37,13 @@ class HomeAssistantServiceExecutor
                 return HaptiqueHttpResponse::error(404, "Entity '$entityId' not found");
             }
 
-            $targetId = (int)($entity['target_id'] ?? 0);
-            if (!$this->executeSingle($domain, $service, $entityId, $targetId)) {
+            if (!$this->executeSingle($domain, $service, $payload, $entity)) {
                 $this->debug('CMD', '⚠️ HA service unsupported', 3, [
                     'domain' => $domain,
                     'service' => $service,
                     'entity_id' => $entityId,
-                    'target_id' => $targetId
+                    'target_id' => (int)($entity['target_id'] ?? 0),
+                    'payload' => $payload
                 ]);
                 return HaptiqueHttpResponse::error(501, "Unsupported service '$domain.$service' for '$entityId'");
             }
@@ -62,13 +62,19 @@ class HomeAssistantServiceExecutor
         return HaptiqueHttpResponse::json(200, $changedStates);
     }
 
-    private function executeSingle(string $domain, string $service, string $entityId, int $targetId): bool
+    private function executeSingle(string $domain, string $service, array $payload, array $entity): bool
     {
+        $entityId = (string)($entity['entity_id'] ?? '');
+        $targetId = (int)($entity['target_id'] ?? 0);
         if ($targetId <= 0) {
             return false;
         }
 
-        if (($domain === 'light' || $domain === 'switch') && ($service === 'turn_on' || $service === 'turn_off')) {
+        if ($domain === 'light' && ($service === 'turn_on' || $service === 'turn_off')) {
+            return $this->executeLightService($service, $payload, $entity);
+        }
+
+        if ($domain === 'switch' && ($service === 'turn_on' || $service === 'turn_off')) {
             $state = $service === 'turn_on';
             $this->debug('CMD', '🎮 RequestAction', 4, [
                 'entity_id' => $entityId,
@@ -89,6 +95,62 @@ class HomeAssistantServiceExecutor
         }
 
         return false;
+    }
+
+    private function executeLightService(string $service, array $payload, array $entity): bool
+    {
+        $entityId = (string)($entity['entity_id'] ?? '');
+        $targets = is_array($entity['targets'] ?? null) ? $entity['targets'] : [];
+        $switchVariable = (int)($targets['switch'] ?? ($entity['target_id'] ?? 0));
+        $brightnessVariable = (int)($targets['brightness'] ?? 0);
+        $colorTemperatureVariable = (int)($targets['color_temperature'] ?? 0);
+
+        if ($switchVariable <= 0) {
+            return false;
+        }
+
+        $this->debug('CMD', '🧭 HA light target mapping', 4, [
+            'entity_id' => $entityId,
+            'friendly_name' => (string)($entity['state_response']['attributes']['friendly_name'] ?? ''),
+            'switch_variable' => $switchVariable,
+            'brightness_variable' => $brightnessVariable,
+            'color_temperature_variable' => $colorTemperatureVariable,
+            'payload' => $payload
+        ]);
+
+        if ($service === 'turn_off') {
+            $this->requestAction($entityId, $switchVariable, false, 'switch');
+            return true;
+        }
+
+        $this->requestAction($entityId, $switchVariable, true, 'switch');
+
+        if (array_key_exists('brightness', $payload) && $brightnessVariable > 0) {
+            $brightness = max(0, min(255, (int)round((float)$payload['brightness'])));
+            $this->requestAction($entityId, $brightnessVariable, $brightness, 'brightness');
+        }
+
+        if (array_key_exists('color_temp_kelvin', $payload) && $colorTemperatureVariable > 0) {
+            $kelvin = max(2000, min(6535, (int)round((float)$payload['color_temp_kelvin'])));
+            $this->requestAction($entityId, $colorTemperatureVariable, $kelvin, 'color_temp_kelvin');
+        } elseif (array_key_exists('color_temp', $payload) && $colorTemperatureVariable > 0) {
+            $mired = max(1, (float)$payload['color_temp']);
+            $kelvin = max(2000, min(6535, (int)round(1000000 / $mired)));
+            $this->requestAction($entityId, $colorTemperatureVariable, $kelvin, 'color_temp');
+        }
+
+        return true;
+    }
+
+    private function requestAction(string $entityId, int $variableId, $value, string $target): void
+    {
+        $this->debug('CMD', '🎮 RequestAction', 4, [
+            'entity_id' => $entityId,
+            'target' => $target,
+            'target_id' => $variableId,
+            'value' => $value
+        ]);
+        RequestAction($variableId, $value);
     }
 
     private function extractEntityIds(array $payload): array

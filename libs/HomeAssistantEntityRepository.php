@@ -92,20 +92,31 @@ class HomeAssistantEntityRepository
             }
 
             $name = (string)($light['Name'] ?? ('Light ' . $switchVarID));
-            $state = $this->readBoolState($switchVarID) ? 'on' : 'off';
-            $entities[] = $this->buildEntity(
+            $isOn = $this->readBoolState($switchVarID);
+            $state = $isOn ? 'on' : 'off';
+            $entity = $this->buildEntity(
                 'light',
                 'light.' . $switchVarID,
                 $switchVarID,
                 $state,
-                [
+                array_merge([
                     'friendly_name' => $name,
                     'manufacturer' => (string)($light['Manufacturer'] ?? ''),
                     'model' => (string)($light['Model'] ?? ''),
-                    'supported_features' => 41
-                ],
+                ], $this->buildLightAttributes($light, $isOn)),
                 $now
             );
+            $entity['targets'] = [
+                'switch' => $switchVarID,
+                'brightness' => (int)($light['BrightnessVariable'] ?? 0),
+                'color_temperature' => (int)($light['ColorTemperatureVariable'] ?? 0)
+            ];
+            $this->debug('ENTITY', '🧭 HA light mapping built', 4, [
+                'entity_id' => $entity['entity_id'],
+                'name' => $name,
+                'targets' => $entity['targets']
+            ]);
+            $entities[] = $entity;
         }
 
         foreach ($this->getData('GetSwitches') as $switch) {
@@ -263,6 +274,40 @@ class HomeAssistantEntityRepository
         return $entities;
     }
 
+    private function buildLightAttributes(array $light, bool $isOn): array
+    {
+        $brightness = $this->readOptionalInt($light['BrightnessVariable'] ?? null);
+        if ($brightness !== null) {
+            $brightness = max(0, min(255, $brightness));
+        }
+
+        $colorTempKelvin = $this->readOptionalInt($light['ColorTemperatureVariable'] ?? null);
+        if ($colorTempKelvin !== null) {
+            $colorTempKelvin = max(2000, min(6535, $colorTempKelvin));
+        }
+
+        $colorMode = $isOn ? 'color_temp' : null;
+        $effectiveColorTempKelvin = $colorTempKelvin ?? 2700;
+
+        return [
+            'min_color_temp_kelvin' => 2000,
+            'max_color_temp_kelvin' => 6535,
+            'supported_color_modes' => [
+                'color_temp',
+                'xy'
+            ],
+            'color_mode' => $colorMode,
+            'brightness' => $isOn ? ($brightness ?? 255) : null,
+            'color_temp_kelvin' => $isOn ? $effectiveColorTempKelvin : null,
+            'hs_color' => $isOn ? [28.235, 67.059] : null,
+            'rgb_color' => $isOn ? [255, 167, 87] : null,
+            'xy_color' => $isOn ? [0.459, 0.41] : null,
+            'mode' => 'normal',
+            'dynamics' => 'none',
+            'supported_features' => 44
+        ];
+    }
+
     private function buildEntity(
         string $domain,
         string $entityId,
@@ -308,6 +353,21 @@ class HomeAssistantEntityRepository
     private function readBoolState(int $variableID): bool
     {
         return (bool)$this->readValue($variableID);
+    }
+
+    private function readOptionalInt($variableID): ?int
+    {
+        $variableID = (int)$variableID;
+        if ($variableID <= 0) {
+            return null;
+        }
+
+        $value = $this->readValue($variableID);
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return (int)round((float)$value);
     }
 
     private function readValue(int $variableID)
