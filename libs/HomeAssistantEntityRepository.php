@@ -379,20 +379,17 @@ class HomeAssistantEntityRepository
     {
         $stateVariable = (int)($mediaPlayer['PlaybackStateVariable'] ?? 0);
         if ($stateVariable > 0) {
-            $state = strtolower(trim((string)$this->readValue($stateVariable)));
-            if (in_array($state, ['playing', 'paused', 'idle', 'standby', 'off', 'unknown', 'unavailable'], true)) {
+            $state = $this->readMediaPlayerStateFromVariable($stateVariable);
+            if ($state !== null) {
                 return $state;
             }
         }
 
         $controlVariable = (int)($mediaPlayer['ControlVariable'] ?? 0);
         if ($controlVariable > 0) {
-            $value = $this->readValue($controlVariable);
-            if (is_string($value)) {
-                $value = strtolower(trim($value));
-                if (in_array($value, ['playing', 'paused', 'idle', 'standby', 'off'], true)) {
-                    return $value;
-                }
+            $state = $this->readMediaPlayerStateFromVariable($controlVariable);
+            if ($state !== null) {
+                return $state;
             }
         }
 
@@ -408,8 +405,8 @@ class HomeAssistantEntityRepository
         $source = $this->readOptionalString($mediaPlayer['SourceVariable'] ?? null, 'Line-in');
         $cover = $this->readOptionalString($mediaPlayer['CoverVariable'] ?? null, '');
         $coverMediaID = (int)($mediaPlayer['CoverMediaID'] ?? 0);
-        $position = $this->readOptionalInt($mediaPlayer['PositionVariable'] ?? null) ?? $this->readOptionalInt($mediaPlayer['ElapsedVariable'] ?? null) ?? 0;
         $duration = $this->readOptionalInt($mediaPlayer['DurationVariable'] ?? null) ?? 167;
+        $position = $this->readMediaPlayerPosition($mediaPlayer, $duration);
         $shuffle = $this->readOptionalBool($mediaPlayer['ShuffleVariable'] ?? null) ?? false;
         $repeat = $this->readMediaPlayerRepeat($mediaPlayer['RepeatVariable'] ?? null);
 
@@ -441,17 +438,83 @@ class HomeAssistantEntityRepository
         return $attributes;
     }
 
-    private function buildMediaPlayerCoverUrl(string $cover, string $entityId): string
+    private function readMediaPlayerStateFromVariable(int $variableID): ?string
     {
-        if (preg_match('#^https?://#i', $cover) === 1 || str_starts_with($cover, '/api/')) {
-            return $cover;
+        $value = $this->readValue($variableID);
+        $state = strtolower(trim((string)$value));
+        if (in_array($state, ['playing', 'paused', 'idle', 'standby', 'off', 'unknown', 'unavailable'], true)) {
+            return $state;
         }
 
+        $profileName = $this->readProfileAssociationName($variableID, $value);
+        if ($profileName !== null) {
+            $state = strtolower(trim($profileName));
+            if (in_array($state, ['playing', 'play', 'media_play'], true)) {
+                return 'playing';
+            }
+
+            if (in_array($state, ['paused', 'pause', 'media_pause'], true)) {
+                return 'paused';
+            }
+
+            if (in_array($state, ['idle', 'stop', 'stopped'], true)) {
+                return 'idle';
+            }
+
+            if (in_array($state, ['standby', 'off'], true)) {
+                return $state;
+            }
+        }
+
+        if (is_numeric($value)) {
+            return match ((int)$value) {
+                0 => 'playing',
+                1 => 'paused',
+                2 => 'idle',
+                3 => 'off',
+                default => null
+            };
+        }
+
+        return null;
+    }
+
+    private function readMediaPlayerPosition(array $mediaPlayer, int $duration): int
+    {
+        $elapsed = $this->readOptionalInt($mediaPlayer['ElapsedVariable'] ?? null);
+        if ($elapsed !== null) {
+            return max(0, $elapsed);
+        }
+
+        $position = $this->readOptionalInt($mediaPlayer['PositionVariable'] ?? null);
+        if ($position === null) {
+            return 0;
+        }
+
+        if ($duration > 0 && $position >= 0 && $position <= 100) {
+            return (int)round(($position / 100) * $duration);
+        }
+
+        return max(0, $position);
+    }
+
+    private function buildMediaPlayerCoverUrl(string $cover, string $entityId): string
+    {
         return '/api/media_player_proxy/' . rawurlencode($entityId) . '?token=symcon-rs90&cache=' . substr(sha1($cover), 0, 16);
     }
 
     private function resolveMediaPlayerCover(string $cover): ?array
     {
+        if (preg_match('#^https?://#i', $cover) === 1) {
+            $body = $this->fetchRemoteMediaPlayerCover($cover);
+            if ($body !== null) {
+                return [
+                    'body' => $body,
+                    'content_type' => $this->guessImageContentTypeFromBinary($body)
+                ];
+            }
+        }
+
         if (preg_match('#^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$#s', $cover, $matches) === 1) {
             $decoded = base64_decode($matches[2], true);
             if (is_string($decoded)) {
@@ -481,6 +544,34 @@ class HomeAssistantEntityRepository
         }
 
         return null;
+    }
+
+    private function fetchRemoteMediaPlayerCover(string $url): ?string
+    {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 5,
+                'ignore_errors' => true,
+                'header' => "User-Agent: IP-Symcon-Haptique-HA-Emulator\r\nAccept: image/*,*/*;q=0.8\r\n"
+            ]
+        ]);
+
+        $body = @file_get_contents($url, false, $context);
+        if (!is_string($body) || $body === '') {
+            $this->debug('ENTITY', '⚠️ HA remote media player cover fetch failed', 3, [
+                'url_preview' => mb_substr($url, 0, 300)
+            ]);
+            return null;
+        }
+
+        $this->debug('ENTITY', '🖼️ HA remote media player cover fetched', 4, [
+            'bytes' => strlen($body),
+            'content_type' => $this->guessImageContentTypeFromBinary($body),
+            'url_preview' => mb_substr($url, 0, 300)
+        ]);
+
+        return $body;
     }
 
     private function resolveMediaPlayerCoverMedia(int $mediaID): ?array
@@ -724,6 +815,44 @@ class HomeAssistantEntityRepository
 
         $repeat = strtolower(trim((string)$value));
         return in_array($repeat, ['off', 'one', 'all'], true) ? $repeat : 'off';
+    }
+
+    private function readProfileAssociationName(int $variableID, $value): ?string
+    {
+        if (!function_exists('IPS_VariableExists') || !@IPS_VariableExists($variableID)) {
+            return null;
+        }
+
+        $variable = @IPS_GetVariable($variableID);
+        if (!is_array($variable)) {
+            return null;
+        }
+
+        $profileName = (string)($variable['VariableCustomProfile'] ?? '');
+        if ($profileName === '') {
+            $profileName = (string)($variable['VariableProfile'] ?? '');
+        }
+
+        if ($profileName === '' || !function_exists('IPS_VariableProfileExists') || !@IPS_VariableProfileExists($profileName)) {
+            return null;
+        }
+
+        $profile = @IPS_GetVariableProfile($profileName);
+        if (!is_array($profile) || !is_array($profile['Associations'] ?? null)) {
+            return null;
+        }
+
+        foreach ($profile['Associations'] as $association) {
+            if (!is_array($association)) {
+                continue;
+            }
+
+            if ((string)($association['Value'] ?? '') === (string)$value) {
+                return (string)($association['Name'] ?? '');
+            }
+        }
+
+        return null;
     }
 
     private function readNumericValue(int $variableID, $fallback)
